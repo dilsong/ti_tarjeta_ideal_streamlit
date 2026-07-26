@@ -41,7 +41,12 @@ def main() -> None:
 
     if not st.session_state.unlocked:
         if use_browser_storage():
-            st.caption("Data local en este dispositivo (navegador). No se sube al servidor.")
+            st.success("Modo piloto: data solo en este teléfono/navegador.")
+        else:
+            st.warning(
+                "Modo Lab (disco del servidor): todos ven el mismo PIN/datos. "
+                "En Streamlit Cloud quita el secret TI_USE_FILESYSTEM y redespliega."
+            )
         render_pin_gate(unlock)
         return
 

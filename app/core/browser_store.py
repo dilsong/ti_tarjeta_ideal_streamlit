@@ -37,8 +37,18 @@ _DEFAULT_NOTIF: dict[str, Any] = {
 }
 
 
+def _is_streamlit_cloud() -> bool:
+    """Community Cloud monta el repo en /mount/src — ahí nunca usamos disco compartido."""
+    return os.path.isdir("/mount/src") or bool(
+        os.environ.get("STREAMLIT_RUNTIME_ENV", "").strip()
+    )
+
+
 def use_browser_storage() -> bool:
     """True = localStorage del navegador. False = archivos en app/data (Lab PC)."""
+    # En Cloud siempre local por dispositivo (evita PIN/datos compartidos entre pilotos).
+    if _is_streamlit_cloud():
+        return True
     flag = os.environ.get("TI_USE_FILESYSTEM", "").strip().lower()
     return flag not in ("1", "true", "yes", "on")
 
