@@ -1,0 +1,11 @@
+# Casos de soporte del piloto (solo desarrollador).
+# Estructura sugerida:
+#   lab_casos/ana/
+#   lab_casos/luis/
+#   lab_casos/maria/
+#
+# Cargar un ZIP en el Lab:
+#   python tools/cargar_caso.py lab_casos/ana/ti_soporte_….zip --piloto ana
+*
+!.gitignore
+!README.txt

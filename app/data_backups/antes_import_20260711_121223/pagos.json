@@ -1,0 +1,32 @@
+[
+  {
+    "id": "d32d8994-4395-4d9e-bb74-a516c36864e0",
+    "id_tarjeta": "76b1ebd7-55ce-4a0e-a897-cb2951cfdeb3",
+    "fecha": "2026-06-30",
+    "monto": 6.05,
+    "estatus_pago": "minimo",
+    "deuda_ciclo_antes": 121.0,
+    "adeudado_despues": 114.95,
+    "adeudado_ciclo_despues": 114.95
+  },
+  {
+    "id": "d2720a1b-6fad-442a-a29e-d8730faf951a",
+    "id_tarjeta": "eb50d61d-d902-480d-b20b-8ba32e4994f2",
+    "fecha": "2026-07-05",
+    "monto": 3033.0,
+    "estatus_pago": "total",
+    "deuda_ciclo_antes": 3033.0,
+    "adeudado_despues": 0.0,
+    "adeudado_ciclo_despues": 0.0
+  },
+  {
+    "id": "f57c8a84-38e4-43d2-85c2-ca1bd050386f",
+    "id_tarjeta": "76b1ebd7-55ce-4a0e-a897-cb2951cfdeb3",
+    "fecha": "2026-07-05",
+    "monto": 114.95,
+    "estatus_pago": "total",
+    "deuda_ciclo_antes": 114.95,
+    "adeudado_despues": 0.0,
+    "adeudado_ciclo_despues": 0.0
+  }
+]

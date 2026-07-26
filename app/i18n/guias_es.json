@@ -1,0 +1,77 @@
+{
+  "bbva": {
+    "secciones": ["Estado de cuenta", "Contrato", "Carátula", "App BBVA", "Detalle de la tarjeta", "Comisiones", "Tasas"],
+    "palabras_clave": ["Tasa de interés", "Tasa ordinaria", "Tasa moratoria", "CAT", "Comisión por pago tardío", "Anualidad", "Comisiones"],
+    "ejemplos": ["Tasa de interés ordinaria anual: 45.00%", "Comisión por pago tardío: $350"]
+  },
+  "banorte": {
+    "secciones": ["Estado de cuenta", "App Banorte", "Contrato", "Carátula", "Detalle de tarjeta"],
+    "palabras_clave": ["Tasa de interés", "Tasa moratoria", "CAT", "Comisión", "Anualidad"],
+    "ejemplos": ["Tasa anual ordinaria", "Comisión por pago tardío"]
+  },
+  "santander": {
+    "secciones": ["Estado de cuenta", "Supermovil", "Contrato", "Comisiones y tasas"],
+    "palabras_clave": ["Tasa de interés", "Tasa moratoria", "CAT", "Comisión por atraso"],
+    "ejemplos": ["Tasa ordinaria anual", "Comisión por pago tardío"]
+  },
+  "hsbc": {
+    "secciones": ["Estado de cuenta", "App HSBC", "Contrato", "Carátula"],
+    "palabras_clave": ["Tasa de interés", "Tasa moratoria", "CAT", "Comisión"],
+    "ejemplos": ["Tasa anual", "Comisión por pago tardío"]
+  },
+  "scotiabank": {
+    "secciones": ["Estado de cuenta", "App Scotiabank", "Contrato", "Tasas y comisiones"],
+    "palabras_clave": ["Tasa de interés", "Tasa moratoria", "CAT", "Comisión"],
+    "ejemplos": ["Tasa ordinaria", "Comisión por pago tardío"]
+  },
+  "inbursa": {
+    "secciones": ["Estado de cuenta", "App Inbursa", "Contrato", "Carátula"],
+    "palabras_clave": ["Tasa de interés", "Tasa moratoria", "CAT", "Comisión"],
+    "ejemplos": ["Tasa anual ordinaria", "Comisión por pago tardío"]
+  },
+  "credit_one": {
+    "secciones": ["Cardholder Agreement", "Terms & Conditions", "Important Information", "Fees & Charges", "Interest Rates and Interest Charges", "Account Details", "More Info"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Late Fee", "Annual Fee", "Daily Periodic Rate", "Finance Charge", "Interest Charged"],
+    "ejemplos": ["Purchase APR 24.99%", "Late Fee up to $39"]
+  },
+  "capital_one": {
+    "secciones": ["Account Terms", "Pricing & Terms", "Cardholder Agreement", "Rates & Fees", "Important Disclosures", "Manage Account"],
+    "palabras_clave": ["APR", "Variable APR", "Penalty APR", "Annual Fee", "Late Payment Fee", "Cash Advance APR", "Balance Transfer APR", "Daily Periodic Rate"],
+    "ejemplos": ["Purchase APR: 28.49% (V)", "Late Payment Fee: Up to $40"]
+  },
+  "chase": {
+    "secciones": ["Pricing & Terms", "Cardmember Agreement", "Account Services", "Statements & Documents", "Rates and Fees", "Important Information"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Fee", "Minimum Interest Charge", "Balance Transfer APR", "Cash Advance APR"],
+    "ejemplos": ["Annual Percentage Rate (APR) for Purchases", "Late Payment Fee: $40"]
+  },
+  "discover": {
+    "secciones": ["Cardmember Agreement", "Terms & Conditions", "Rates & Fees", "Account Center", "Statements", "Important Information"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Fee", "Returned Payment Fee", "Cash Advance APR", "Daily Balance Method"],
+    "ejemplos": ["Standard Purchase APR: 18.99% - 27.99%", "Late Fee: up to $41"]
+  },
+  "bank_of_america": {
+    "secciones": ["Credit Card Agreement", "Pricing & Terms", "Statements & Documents", "Account Information", "Rates and Fees", "Disclosures"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Payment", "Transaction Fee", "Balance Transfer APR", "Cash Advance APR"],
+    "ejemplos": ["APR for Purchases: 20.24%", "Late Payment Fee: Up to $40"]
+  },
+  "wells_fargo": {
+    "secciones": ["Credit Card Agreement", "Consumer Credit Card Customer Agreement", "Rates and Fees", "Account Services", "Statements", "Disclosures"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Fee", "Overdraft", "Cash Advance APR", "Daily Periodic Rate"],
+    "ejemplos": ["Annual Percentage Rate (APR) for Purchases", "Late Fee: up to $40"]
+  },
+  "citi": {
+    "secciones": ["Card Agreement", "Pricing & Terms", "Statements & Documents", "Account Details", "Rates & Fees", "Important Information"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Fee", "Cash Advance APR", "Balance Transfer APR", "Finance Charge"],
+    "ejemplos": ["Purchase APR: 22.24%", "Late Fee: up to $41"]
+  },
+  "american_express": {
+    "secciones": ["Cardmember Agreement", "Rates & Fees", "Account Services", "Statements", "Important Disclosures", "Terms & Conditions"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Annual Fee", "Late Fee", "Pay Over Time APR", "Cash Advance APR", "Finance Charge"],
+    "ejemplos": ["Annual Percentage Rate: 21.99%", "Late Payment Fee: up to $40"]
+  },
+  "otro": {
+    "secciones": ["Cardholder Agreement / Contrato", "Terms & Conditions / Términos", "Rates & Fees / Tasas y comisiones", "Statements / Estado de cuenta", "Account Details / Detalle de cuenta"],
+    "palabras_clave": ["APR", "Purchase APR", "Penalty APR", "Late Fee", "Annual Fee", "Tasa de interés", "Tasa moratoria", "CAT", "Comisión", "Anualidad"],
+    "ejemplos": ["APR or Tasa de interés anual", "Late Fee or Comisión por atraso"]
+  }
+}
