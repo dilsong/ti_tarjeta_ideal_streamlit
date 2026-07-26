@@ -1,16 +1,15 @@
-# Piloto Streamlit — data local por dispositivo
+# Piloto Streamlit — data por dispositivo
 
 ## Qué cambió
 
-La app Streamlit guarda **tarjetas, pagos, consumos, PIN e idioma** en el
-`localStorage` del navegador de cada usuario.
+La app guarda **tarjetas, pagos, consumos, PIN e idioma** por dispositivo.
 
-- No se escribe en `app/data/` del servidor (modo piloto).
-- No se sube a GitHub.
-- Cada teléfono/PC tiene su propia data (origen del navegador).
-- Persiste al cerrar la pestaña o el navegador.
+En Streamlit Cloud el `localStorage` del navegador **no sirve** (queda aislado
+en un iframe). En su lugar:
 
-Clave: `ti_tarjeta_ideal_v1`
+- Cada piloto recibe un ID en la URL: `?ti=...`
+- Sus datos se guardan en un archivo propio en el servidor (no en GitHub)
+- **Hay que reabrir el mismo enlace** (con `?ti=`) o guardarlo en favoritos
 
 ## Cómo correr el piloto
 
@@ -20,14 +19,15 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Comparte la URL (o usa un túnel tipo ngrok / Cloudflare) para que cada piloto
-abra TI en **su** navegador (Safari/Chrome del teléfono).
+En Cloud: sube el repo; el archivo `packages.txt` instala Tesseract para OCR.
 
-Primera vez en un dispositivo: data en blanco → crear PIN → registrar tarjetas.
+## Importante para pilotos
 
-## Lab en tu PC (archivos JSON, como antes)
+1. Tras crear el PIN, **guarda la URL completa** (debe verse `?ti=` en la barra).
+2. Si abres solo el link corto sin `?ti=`, la app cree que eres un dispositivo nuevo.
+3. Usa Ayuda → exportar ZIP como respaldo.
 
-Solo si necesitas `cargar_caso.py` o depurar con JSON en disco:
+## Lab en tu PC (archivos JSON compartidos)
 
 ```powershell
 $env:TI_USE_FILESYSTEM="1"
@@ -36,5 +36,5 @@ streamlit run streamlit_app.py
 
 ## Soporte
 
-El ZIP de Ayuda exporta la data del **dispositivo actual** (sin PIN).
-En modo navegador, importar el ZIP restaura en ese mismo localStorage.
+El ZIP de Ayuda exporta la data del dispositivo actual (sin PIN).
+Importar el ZIP restaura en ese mismo dispositivo (`?ti=`).

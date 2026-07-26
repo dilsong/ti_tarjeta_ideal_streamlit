@@ -1,25 +1,30 @@
 """
-Persistencia por dispositivo en el navegador (localStorage).
+Persistencia por dispositivo (modo piloto).
 
-Cada usuario/piloto guarda su data SOLO en su teléfono/PC (origen del navegador).
-No escribe a disco del servidor ni a GitHub.
+Cada piloto tiene un ID en la URL (?ti=...) y un archivo JSON propio.
+En Streamlit Cloud el localStorage de componentes NO persiste (iframe),
+por eso usamos disco escribible + ID en el enlace.
 
-Activación: por defecto ON en Streamlit.
-Lab con JSON en disco (soporte/cargar_caso): TI_USE_FILESYSTEM=1
+- Cloud: /tmp/ti_tarjeta_ideal_devices/{id}.json
+- Local piloto: app/data/devices/{id}.json
+- Lab compartido: TI_USE_FILESYSTEM=1 → app/data/*.json (sin ID)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
-LS_KEY = "ti_tarjeta_ideal_v1"
 _SESSION_BUNDLE = "ti_local_bundle"
 _SESSION_HYDRATED = "ti_local_hydrated"
-_SESSION_SAVE_N = "ti_local_save_n"
-_EMPTY_SENTINEL = "__EMPTY__"
+_SESSION_DEVICE = "ti_device_id"
+_DEVICE_PARAM = "ti"
+_DEVICE_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 _DEFAULT_NOTIF: dict[str, Any] = {
     "notificar_dia_corte": True,
@@ -38,15 +43,14 @@ _DEFAULT_NOTIF: dict[str, Any] = {
 
 
 def _is_streamlit_cloud() -> bool:
-    """Community Cloud monta el repo en /mount/src — ahí nunca usamos disco compartido."""
+    """Community Cloud monta el repo en /mount/src."""
     return os.path.isdir("/mount/src") or bool(
         os.environ.get("STREAMLIT_RUNTIME_ENV", "").strip()
     )
 
 
 def use_browser_storage() -> bool:
-    """True = localStorage del navegador. False = archivos en app/data (Lab PC)."""
-    # En Cloud siempre local por dispositivo (evita PIN/datos compartidos entre pilotos).
+    """True = data por dispositivo (piloto). False = app/data compartido (Lab)."""
     if _is_streamlit_cloud():
         return True
     flag = os.environ.get("TI_USE_FILESYSTEM", "").strip().lower()
@@ -92,11 +96,80 @@ def merge_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
     return base
 
 
+def _devices_dir() -> Path:
+    if _is_streamlit_cloud():
+        base = Path("/tmp/ti_tarjeta_ideal_devices")
+    else:
+        base = Path(__file__).resolve().parent.parent / "data" / "devices"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _device_path(device_id: str) -> Path:
+    return _devices_dir() / f"{device_id}.json"
+
+
+def _valid_device_id(value: str) -> bool:
+    return bool(_DEVICE_ID_RE.match(value or ""))
+
+
+def _read_query_device_id() -> str:
+    import streamlit as st
+
+    raw = st.query_params.get(_DEVICE_PARAM, "")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    return str(raw).strip().lower()
+
+
+def ensure_device_id() -> str:
+    """Obtiene o crea el ID del dispositivo y lo deja en la URL (?ti=...)."""
+    import streamlit as st
+
+    existing = st.session_state.get(_SESSION_DEVICE)
+    if isinstance(existing, str) and _valid_device_id(existing):
+        if _read_query_device_id() != existing:
+            st.query_params[_DEVICE_PARAM] = existing
+        return existing
+
+    from_url = _read_query_device_id()
+    if _valid_device_id(from_url):
+        device_id = from_url
+    else:
+        device_id = uuid.uuid4().hex
+
+    st.session_state[_SESSION_DEVICE] = device_id
+    if _read_query_device_id() != device_id:
+        st.query_params[_DEVICE_PARAM] = device_id
+    return device_id
+
+
+def _load_device_file(device_id: str) -> dict[str, Any]:
+    path = _device_path(device_id)
+    if not path.exists():
+        return empty_bundle()
+    try:
+        with path.open(encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return empty_bundle()
+    return merge_with_defaults(raw if isinstance(raw, dict) else None)
+
+
+def _save_device_file(device_id: str, bundle: dict[str, Any]) -> None:
+    path = _device_path(device_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = merge_with_defaults(bundle)
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    tmp.replace(path)
+
+
 def hydrate_from_localstorage() -> None:
     """
-    Carga el bundle desde localStorage al iniciar.
-    Si no hay data, inicializa en blanco y la guarda en el dispositivo.
-    Puede llamar st.stop() mientras el componente JS termina de responder.
+    Carga el bundle del dispositivo (?ti=) al iniciar.
+    Mantiene el nombre histórico; ya no usa localStorage del navegador.
     """
     import streamlit as st
 
@@ -107,44 +180,13 @@ def hydrate_from_localstorage() -> None:
     if st.session_state.get(_SESSION_HYDRATED):
         return
 
-    try:
-        from streamlit_js_eval import streamlit_js_eval
-    except ImportError as exc:
-        st.error(
-            "Falta el paquete streamlit-js-eval para data local en el navegador.\n"
-            "Ejecuta: pip install streamlit-js-eval"
-        )
-        st.stop()
-        raise exc
-
-    js = (
-        "(function(){"
-        f"var v=localStorage.getItem({json.dumps(LS_KEY)});"
-        f"return (v===null||v==='') ? {json.dumps(_EMPTY_SENTINEL)} : v;"
-        "})()"
-    )
-    raw = streamlit_js_eval(js_expressions=js, key="ti_hydrate_ls_v1")
-
-    # Primera pasada: el componente aún no devolvió valor
-    if raw is None:
-        st.info("Cargando tu data local en este dispositivo…")
-        st.stop()
-
-    if raw == _EMPTY_SENTINEL:
-        bundle = empty_bundle()
-        st.session_state[_SESSION_BUNDLE] = bundle
-        st.session_state[_SESSION_HYDRATED] = True
-        flush_bundle_to_localstorage(bundle)
-        return
-
-    try:
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
-    except (TypeError, json.JSONDecodeError):
-        parsed = None
-
-    bundle = merge_with_defaults(parsed if isinstance(parsed, dict) else None)
+    device_id = ensure_device_id()
+    bundle = _load_device_file(device_id)
     st.session_state[_SESSION_BUNDLE] = bundle
     st.session_state[_SESSION_HYDRATED] = True
+    # Si es la primera vez, materializa el archivo vacío
+    if not _device_path(device_id).exists():
+        _save_device_file(device_id, bundle)
 
 
 def get_bundle() -> dict[str, Any]:
@@ -156,7 +198,7 @@ def get_bundle() -> dict[str, Any]:
 
 
 def replace_bundle(bundle: dict[str, Any]) -> None:
-    """Reemplaza el bundle completo (p. ej. importar ZIP) y persiste en el dispositivo."""
+    """Reemplaza el bundle completo (p. ej. importar ZIP) y persiste."""
     import streamlit as st
 
     merged = merge_with_defaults(bundle)
@@ -165,7 +207,7 @@ def replace_bundle(bundle: dict[str, Any]) -> None:
 
 
 def set_section(section: str, data: Any) -> None:
-    """Actualiza una sección del bundle y la escribe en localStorage."""
+    """Actualiza una sección del bundle y la persiste en disco del dispositivo."""
     import streamlit as st
 
     bundle = get_bundle()
@@ -175,23 +217,13 @@ def set_section(section: str, data: Any) -> None:
 
 
 def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
-    """Escribe el bundle actual en localStorage del navegador (no al servidor)."""
-    import streamlit as st
-    import streamlit.components.v1 as components
-
+    """Persiste el bundle del dispositivo actual (nombre histórico)."""
     if not use_browser_storage():
         return
 
+    device_id = ensure_device_id()
     payload_obj = bundle if bundle is not None else get_bundle()
-    payload = json.dumps(payload_obj, ensure_ascii=False)
-    n = int(st.session_state.get(_SESSION_SAVE_N, 0)) + 1
-    st.session_state[_SESSION_SAVE_N] = n
-    # components.html escribe en el cliente; no sube el JSON al repo ni al disco del server.
-    components.html(
-        f"<script>localStorage.setItem({json.dumps(LS_KEY)}, {json.dumps(payload)});</script>",
-        height=0,
-        width=0,
-    )
+    _save_device_file(device_id, payload_obj)
 
 
 # --- API usada por tarjetas / pagos / consumos / config / notificaciones ---

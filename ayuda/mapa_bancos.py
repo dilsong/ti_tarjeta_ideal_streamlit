@@ -169,10 +169,16 @@ def mostrar_mapa_ayuda(banco: str) -> None:
 
 
 def _ocr_disponible() -> bool:
+    """True si el binario Tesseract responde (no basta con el paquete pip)."""
     try:
-        import pytesseract  # noqa: F401
-        return True
+        import pytesseract
+        from pytesseract import TesseractNotFoundError
     except ImportError:
+        return False
+    try:
+        pytesseract.get_tesseract_version()
+        return True
+    except (TesseractNotFoundError, OSError):
         return False
 
 
@@ -180,8 +186,13 @@ def _texto_desde_imagen(imagen: Image.Image) -> str:
     if not _ocr_disponible():
         return ""
     import pytesseract
+    from pytesseract import TesseractNotFoundError
 
-    return pytesseract.image_to_string(imagen)
+    try:
+        return pytesseract.image_to_string(imagen)
+    except (TesseractNotFoundError, OSError):
+        return ""
+
 
 
 def _extraer_float(match: re.Match[str]) -> float:
@@ -430,7 +441,10 @@ def mapa_ayuda_bancaria(tarjeta_sel: Tarjeta | None = None, *, key_prefix: str =
         imagen_prev = Image.open(BytesIO(captura.getvalue()))
         st.image(imagen_prev, caption=t("ayuda_bancos.vista_previa"), use_container_width=True)
     if not _ocr_disponible():
-        st.caption(t("ayuda_bancos.ocr_no_disponible"))
+        st.info(
+            t("ayuda_bancos.ocr_no_disponible")
+            + " Puedes pegar el texto de la captura en el cuadro de abajo y analizar."
+        )
 
     puede_analizar = bool(captura or texto_manual.strip())
     resultados: ResultadosOCR | None = None
@@ -443,6 +457,11 @@ def mapa_ayuda_bancaria(tarjeta_sel: Tarjeta | None = None, *, key_prefix: str =
     ):
         imagen = Image.open(BytesIO(captura.getvalue())) if captura else Image.new("RGB", (1, 1), "white")
         resultados = procesar_captura(imagen, texto_manual=texto_manual)
+        if captura and not resultados.texto_crudo.strip() and not texto_manual.strip():
+            st.warning(
+                "No se pudo leer texto de la imagen (OCR no disponible). "
+                "Pega el texto de la captura en el cuadro manual y vuelve a analizar."
+            )
         st.session_state[ocr_key] = resultados.to_dict()
         st.session_state[ocr_texto_key] = resultados.texto_crudo
 

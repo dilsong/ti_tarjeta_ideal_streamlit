@@ -131,7 +131,7 @@ def _validar_paquete(zf: zipfile.ZipFile) -> dict[str, Any]:
 def importar_paquete_soporte(contenido: bytes) -> dict[str, Any]:
     """
     Restaura data del ZIP.
-    - Modo navegador: escribe en localStorage del dispositivo (conserva PIN local).
+    - Modo piloto: escribe en el archivo del dispositivo (?ti=; conserva PIN).
     - Modo filesystem (Lab PC): escribe en app/data tras backup.
     """
     from app.core.browser_store import (

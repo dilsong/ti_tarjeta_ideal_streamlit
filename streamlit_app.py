@@ -1,12 +1,8 @@
 """
-Launcher Streamlit — piloto con data local por dispositivo (localStorage).
+Launcher Streamlit — piloto con data por dispositivo (?ti= en la URL).
 
-Cada usuario guarda su data SOLO en su navegador (teléfono/PC).
-No se escribe en el servidor ni en GitHub.
-
-    streamlit run streamlit_app.py
-
-Lab en PC con JSON en disco (cargar_caso / depuración):
+Cada piloto guarda su data en un archivo propio ligado al enlace.
+Lab en PC con JSON compartido:
 
     set TI_USE_FILESYSTEM=1
     streamlit run streamlit_app.py

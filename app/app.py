@@ -23,10 +23,10 @@ from notificaciones.notificador_ciclos import ejecutar_notificaciones_diarias
 def main() -> None:
     setup_page()
 
-    # Data por dispositivo: hidratar localStorage antes de PIN / i18n / pantallas.
+    # Data por dispositivo (?ti= en la URL) antes de PIN / i18n / pantallas.
     from app.core.browser_store import hydrate_from_localstorage, use_browser_storage
 
-    hydrate_from_localstorage()  # puede st.stop() mientras carga el JS
+    hydrate_from_localstorage()
 
     init_i18n()
 
@@ -41,7 +41,10 @@ def main() -> None:
 
     if not st.session_state.unlocked:
         if use_browser_storage():
-            st.success("Modo piloto: data solo en este teléfono/navegador.")
+            st.success(
+                "Modo piloto: tus datos van con este enlace (?ti=…). "
+                "Guarda la página en favoritos o no borres el link de la barra."
+            )
         else:
             st.warning(
                 "Modo Lab (disco del servidor): todos ven el mismo PIN/datos. "
