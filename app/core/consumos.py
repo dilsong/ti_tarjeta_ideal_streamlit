@@ -45,6 +45,10 @@ class Consumo:
 
 
 def _read_consumos_raw() -> list[dict[str, Any]]:
+    from app.core.browser_store import read_consumos, use_browser_storage
+
+    if use_browser_storage():
+        return read_consumos()
     if not _CONSUMOS_FILE.exists():
         return []
     with _CONSUMOS_FILE.open(encoding="utf-8") as f:
@@ -52,6 +56,11 @@ def _read_consumos_raw() -> list[dict[str, Any]]:
 
 
 def _write_consumos_raw(data: list[dict[str, Any]]) -> None:
+    from app.core.browser_store import use_browser_storage, write_consumos
+
+    if use_browser_storage():
+        write_consumos(data)
+        return
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _CONSUMOS_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

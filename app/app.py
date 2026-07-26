@@ -22,6 +22,12 @@ from notificaciones.notificador_ciclos import ejecutar_notificaciones_diarias
 
 def main() -> None:
     setup_page()
+
+    # Data por dispositivo: hidratar localStorage antes de PIN / i18n / pantallas.
+    from app.core.browser_store import hydrate_from_localstorage, use_browser_storage
+
+    hydrate_from_localstorage()  # puede st.stop() mientras carga el JS
+
     init_i18n()
 
     if "unlocked" not in st.session_state:
@@ -34,6 +40,8 @@ def main() -> None:
         st.rerun()
 
     if not st.session_state.unlocked:
+        if use_browser_storage():
+            st.caption("Data local en este dispositivo (navegador). No se sube al servidor.")
         render_pin_gate(unlock)
         return
 

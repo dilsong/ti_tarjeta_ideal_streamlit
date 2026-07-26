@@ -15,6 +15,10 @@ _CONFIG_FILE = _DATA_DIR / "config.json"
 
 
 def _load_config() -> dict[str, Any]:
+    from app.core.browser_store import read_config, use_browser_storage
+
+    if use_browser_storage():
+        return read_config()
     if not _CONFIG_FILE.exists():
         return {}
     with _CONFIG_FILE.open(encoding="utf-8") as f:
@@ -22,6 +26,11 @@ def _load_config() -> dict[str, Any]:
 
 
 def _save_config(config: dict[str, Any]) -> None:
+    from app.core.browser_store import use_browser_storage, write_config
+
+    if use_browser_storage():
+        write_config(config)
+        return
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _CONFIG_FILE.open("w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)

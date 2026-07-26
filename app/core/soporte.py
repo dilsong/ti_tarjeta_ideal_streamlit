@@ -45,6 +45,8 @@ def _config_sin_pin(config: dict[str, Any] | None) -> dict[str, Any]:
 
 def crear_paquete_soporte(*, nota: str = "", plataforma: str = "lab") -> bytes:
     """Genera un ZIP en memoria listo para descarga."""
+    from app.core.browser_store import get_bundle, use_browser_storage
+
     meta = {
         "producto": PRODUCTO,
         "version_ti": VERSION,
@@ -58,22 +60,41 @@ def crear_paquete_soporte(*, nota: str = "", plataforma: str = "lab") -> bytes:
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
 
-        for nombre in _ARCHIVOS_DATA:
-            path = _DATA_DIR / nombre
-            data = _leer_json(path)
-            if nombre == "config.json":
-                data = _config_sin_pin(data if isinstance(data, dict) else None)
-            elif data is None:
-                data = [] if nombre != "config.json" else {"idioma": "es"}
-            zf.writestr(nombre, json.dumps(data, ensure_ascii=False, indent=2))
-
-        if _NOTIF_FILE.exists():
-            notif = _leer_json(_NOTIF_FILE)
+        if use_browser_storage():
+            bundle = get_bundle()
+            mapping = {
+                "tarjetas.json": bundle.get("tarjetas") or [],
+                "pagos.json": bundle.get("pagos") or [],
+                "consumos.json": bundle.get("consumos") or [],
+                "config.json": _config_sin_pin(
+                    bundle.get("config") if isinstance(bundle.get("config"), dict) else None
+                ),
+            }
+            for nombre, data in mapping.items():
+                zf.writestr(nombre, json.dumps(data, ensure_ascii=False, indent=2))
+            notif = bundle.get("notificaciones")
             if notif is not None:
                 zf.writestr(
                     "notificaciones_usuario.json",
                     json.dumps(notif, ensure_ascii=False, indent=2),
                 )
+        else:
+            for nombre in _ARCHIVOS_DATA:
+                path = _DATA_DIR / nombre
+                data = _leer_json(path)
+                if nombre == "config.json":
+                    data = _config_sin_pin(data if isinstance(data, dict) else None)
+                elif data is None:
+                    data = [] if nombre != "config.json" else {"idioma": "es"}
+                zf.writestr(nombre, json.dumps(data, ensure_ascii=False, indent=2))
+
+            if _NOTIF_FILE.exists():
+                notif = _leer_json(_NOTIF_FILE)
+                if notif is not None:
+                    zf.writestr(
+                        "notificaciones_usuario.json",
+                        json.dumps(notif, ensure_ascii=False, indent=2),
+                    )
 
     return buf.getvalue()
 
@@ -109,22 +130,68 @@ def _validar_paquete(zf: zipfile.ZipFile) -> dict[str, Any]:
 
 def importar_paquete_soporte(contenido: bytes) -> dict[str, Any]:
     """
-    Restaura data del ZIP en app/data (tras backup).
-    Conserva el PIN local actual del lab (no importa pin del paquete).
+    Restaura data del ZIP.
+    - Modo navegador: escribe en localStorage del dispositivo (conserva PIN local).
+    - Modo filesystem (Lab PC): escribe en app/data tras backup.
     """
-    backup = _backup_data_actual()
-    pin_actual = {}
-    config_actual = _leer_json(_DATA_DIR / "config.json")
-    if isinstance(config_actual, dict):
-        if config_actual.get("pin_hash"):
-            pin_actual["pin_hash"] = config_actual["pin_hash"]
-        if config_actual.get("pin_salt"):
-            pin_actual["pin_salt"] = config_actual["pin_salt"]
-
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    from app.core.browser_store import (
+        empty_bundle,
+        get_bundle,
+        replace_bundle,
+        use_browser_storage,
+    )
 
     with zipfile.ZipFile(BytesIO(contenido), "r") as zf:
         meta = _validar_paquete(zf)
+
+        if use_browser_storage():
+            actual = get_bundle()
+            pin_actual = {}
+            cfg_act = actual.get("config") if isinstance(actual.get("config"), dict) else {}
+            if cfg_act.get("pin_hash"):
+                pin_actual["pin_hash"] = cfg_act["pin_hash"]
+            if cfg_act.get("pin_salt"):
+                pin_actual["pin_salt"] = cfg_act["pin_salt"]
+
+            nuevo = empty_bundle()
+            for nombre, section in (
+                ("tarjetas.json", "tarjetas"),
+                ("pagos.json", "pagos"),
+                ("consumos.json", "consumos"),
+            ):
+                if nombre in zf.namelist():
+                    raw = json.loads(zf.read(nombre).decode("utf-8"))
+                    nuevo[section] = raw if isinstance(raw, list) else []
+
+            if "config.json" in zf.namelist():
+                raw_c = json.loads(zf.read("config.json").decode("utf-8"))
+                if not isinstance(raw_c, dict):
+                    raw_c = {"idioma": "es"}
+                raw_c = _config_sin_pin(raw_c)
+                raw_c.update(pin_actual)
+                nuevo["config"] = raw_c
+            else:
+                nuevo["config"] = {**nuevo["config"], **pin_actual}
+
+            if "notificaciones_usuario.json" in zf.namelist():
+                raw_n = json.loads(zf.read("notificaciones_usuario.json").decode("utf-8"))
+                if isinstance(raw_n, dict):
+                    nuevo["notificaciones"] = raw_n
+
+            replace_bundle(nuevo)
+            return {"meta": meta, "backup": "(navegador — sin backup en disco)"}
+
+        backup = _backup_data_actual()
+        pin_actual = {}
+        config_actual = _leer_json(_DATA_DIR / "config.json")
+        if isinstance(config_actual, dict):
+            if config_actual.get("pin_hash"):
+                pin_actual["pin_hash"] = config_actual["pin_hash"]
+            if config_actual.get("pin_salt"):
+                pin_actual["pin_salt"] = config_actual["pin_salt"]
+
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+
         for nombre in _ARCHIVOS_DATA:
             if nombre not in zf.namelist():
                 continue
@@ -144,7 +211,4 @@ def importar_paquete_soporte(contenido: bytes) -> dict[str, Any]:
             with _NOTIF_FILE.open("w", encoding="utf-8") as f:
                 json.dump(raw_n, f, ensure_ascii=False, indent=2)
 
-    return {
-        "meta": meta,
-        "backup": str(backup),
-    }
+        return {"meta": meta, "backup": str(backup)}

@@ -157,6 +157,10 @@ class Tarjeta:
 
 
 def _read_tarjetas_raw() -> list[dict[str, Any]]:
+    from app.core.browser_store import read_tarjetas, use_browser_storage
+
+    if use_browser_storage():
+        return read_tarjetas()
     if not _TARJETAS_FILE.exists():
         return []
     with _TARJETAS_FILE.open(encoding="utf-8") as f:
@@ -164,6 +168,11 @@ def _read_tarjetas_raw() -> list[dict[str, Any]]:
 
 
 def _write_tarjetas_raw(data: list[dict[str, Any]]) -> None:
+    from app.core.browser_store import use_browser_storage, write_tarjetas
+
+    if use_browser_storage():
+        write_tarjetas(data)
+        return
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _TARJETAS_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

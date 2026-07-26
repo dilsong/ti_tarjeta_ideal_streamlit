@@ -46,6 +46,10 @@ class RegistroPago:
 
 
 def _read_pagos_raw() -> list[dict[str, Any]]:
+    from app.core.browser_store import read_pagos, use_browser_storage
+
+    if use_browser_storage():
+        return read_pagos()
     if not _PAGOS_FILE.exists():
         return []
     with _PAGOS_FILE.open(encoding="utf-8") as f:
@@ -53,6 +57,11 @@ def _read_pagos_raw() -> list[dict[str, Any]]:
 
 
 def _write_pagos_raw(data: list[dict[str, Any]]) -> None:
+    from app.core.browser_store import use_browser_storage, write_pagos
+
+    if use_browser_storage():
+        write_pagos(data)
+        return
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with _PAGOS_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

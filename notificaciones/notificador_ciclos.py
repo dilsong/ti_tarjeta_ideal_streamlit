@@ -70,6 +70,10 @@ def _mensaje(cuerpo: str, tarjeta_nombre: str = "") -> str:
 
 
 def cargar_config_notificaciones() -> dict[str, Any]:
+    from app.core.browser_store import read_notificaciones, use_browser_storage
+
+    if use_browser_storage():
+        return read_notificaciones()
     if not _CONFIG_FILE.exists():
         return dict(DEFAULT_CONFIG)
     with _CONFIG_FILE.open(encoding="utf-8") as f:
@@ -80,6 +84,11 @@ def cargar_config_notificaciones() -> dict[str, Any]:
 
 
 def guardar_config_notificaciones(config: dict[str, Any]) -> None:
+    from app.core.browser_store import use_browser_storage, write_notificaciones
+
+    if use_browser_storage():
+        write_notificaciones(config)
+        return
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     merged = dict(DEFAULT_CONFIG)
     merged.update(config)
