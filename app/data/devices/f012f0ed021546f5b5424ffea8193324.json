@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "tarjetas": [],
+  "pagos": [],
+  "consumos": [],
+  "config": {
+    "pin_hash": "",
+    "pin_salt": "",
+    "idioma": "es"
+  },
+  "notificaciones": {
+    "notificar_dia_corte": true,
+    "notificar_antes_corte": true,
+    "dias_antes_corte": 3,
+    "notificar_mitad_ciclo": true,
+    "dias_mitad_ciclo": 10,
+    "notificar_antes_pago": true,
+    "dias_antes_pago": 3,
+    "notificar_despues_pago": true,
+    "notificar_dias_despues_corte": true,
+    "notificar_inicio_ciclo": true,
+    "ultima_ejecucion": null,
+    "historial_enviados": []
+  }
+}
