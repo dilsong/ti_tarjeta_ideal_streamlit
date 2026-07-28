@@ -387,4 +387,16 @@ MOBILE_CSS = """
 </style>
 """
 
-BANCOS_DEFAULT = ["BBVA", "Banorte", "Santander", "HSBC", "Scotiabank", "Inbursa"]
+BANCOS_MX = ["BBVA", "Banorte", "Santander", "HSBC", "Scotiabank", "Inbursa"]
+BANCOS_USA = [
+    "Credit One",
+    "Capital One",
+    "Chase",
+    "Discover",
+    "Bank of America",
+    "Wells Fargo",
+    "Citi",
+    "American Express",
+]
+# Lista unificada: crear/editar tarjeta y Guía usan los mismos bancos.
+BANCOS_DEFAULT = BANCOS_MX + BANCOS_USA

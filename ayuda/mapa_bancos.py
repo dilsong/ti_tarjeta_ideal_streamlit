@@ -12,21 +12,10 @@ from typing import Any
 import streamlit as st
 from PIL import Image
 
-from app.components.theme import BANCOS_DEFAULT
+from app.components.theme import BANCOS_DEFAULT, BANCOS_USA
 from app.core.intereses import BASE_DIAS_ANIO
 from app.core.tarjetas import Tarjeta, guardar_tarjeta, listar_tarjetas
 from app.i18n.translator import t
-
-BANCOS_USA = [
-    "Credit One",
-    "Capital One",
-    "Chase",
-    "Discover",
-    "Bank of America",
-    "Wells Fargo",
-    "Citi",
-    "American Express",
-]
 
 OTRO_BANCO = "Otro banco"
 
@@ -86,6 +75,12 @@ class ResultadosOCR:
     daily_rate: float | None = None
     finance_charge: float | None = None
     texto_crudo: str = ""
+    dia_corte: int | None = None
+    dia_pago: int | None = None
+    saldo: float | None = None
+    limite: float | None = None
+    disponible: float | None = None
+    ultimos_digitos: str | None = None
 
     def tiene_datos(self) -> bool:
         return any(
@@ -97,6 +92,12 @@ class ResultadosOCR:
                 self.annual_fee,
                 self.daily_rate,
                 self.finance_charge,
+                self.dia_corte,
+                self.dia_pago,
+                self.saldo,
+                self.limite,
+                self.disponible,
+                self.ultimos_digitos,
             )
         )
 
@@ -109,14 +110,39 @@ class ResultadosOCR:
             "penalty_apr": self.penalty_apr,
             "late_fee": self.late_fee,
             "annual_fee": self.annual_fee,
+            "daily_rate": self.daily_rate,
             "finance_charge": self.finance_charge,
+            "dia_corte": self.dia_corte,
+            "dia_pago": self.dia_pago,
+            "saldo": self.saldo,
+            "limite": self.limite,
+            "disponible": self.disponible,
+            "ultimos_digitos": self.ultimos_digitos,
         }
+
+    @classmethod
+    def desde_datos_captura(cls, d: Any) -> "ResultadosOCR":
+        return cls(
+            apr=d.apr,
+            penalty_apr=d.penalty_apr,
+            late_fee=d.late_fee,
+            annual_fee=d.annual_fee,
+            daily_rate=d.daily_rate,
+            finance_charge=d.finance_charge,
+            texto_crudo=d.texto_crudo,
+            dia_corte=d.dia_corte,
+            dia_pago=d.dia_pago,
+            saldo=d.saldo,
+            limite=d.limite,
+            disponible=d.disponible,
+            ultimos_digitos=d.ultimos_digitos,
+        )
 
 
 def listar_bancos_guia() -> list[str]:
     vistos: set[str] = set()
     orden: list[str] = []
-    for nombre in list(BANCOS_DEFAULT) + BANCOS_USA:
+    for nombre in list(BANCOS_DEFAULT) + list(BANCOS_USA):
         if nombre not in vistos:
             vistos.add(nombre)
             orden.append(nombre)
@@ -169,30 +195,15 @@ def mostrar_mapa_ayuda(banco: str) -> None:
 
 
 def _ocr_disponible() -> bool:
-    """True si el binario Tesseract responde (no basta con el paquete pip)."""
-    try:
-        import pytesseract
-        from pytesseract import TesseractNotFoundError
-    except ImportError:
-        return False
-    try:
-        pytesseract.get_tesseract_version()
-        return True
-    except (TesseractNotFoundError, OSError):
-        return False
+    from app.core.ocr_captura import ocr_disponible
+
+    return ocr_disponible()
 
 
 def _texto_desde_imagen(imagen: Image.Image) -> str:
-    if not _ocr_disponible():
-        return ""
-    import pytesseract
-    from pytesseract import TesseractNotFoundError
+    from app.core.ocr_captura import texto_desde_imagen
 
-    try:
-        return pytesseract.image_to_string(imagen)
-    except (TesseractNotFoundError, OSError):
-        return ""
-
+    return texto_desde_imagen(imagen)
 
 
 def _extraer_float(match: re.Match[str]) -> float:
@@ -200,71 +211,15 @@ def _extraer_float(match: re.Match[str]) -> float:
 
 
 def extraer_datos_financieros(texto: str) -> ResultadosOCR:
-    resultados = ResultadosOCR(texto_crudo=texto)
-    if not texto.strip():
-        return resultados
+    from app.core.ocr_captura import extraer_datos_captura
 
-    patrones_apr = [
-        r"(?:Purchase\s+)?APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
-        r"Tasa\s+(?:de\s+)?inter[eé]s\s+(?:ordinari[ao]\s+)?anual[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
-        r"Tasa\s+anual\s+ordinari[ao][:\s]*([\d]+(?:[.,]\d+)?)\s*%",
-        r"(?:Annual\s+Percentage\s+Rate|APR)\s*(?:for\s+Purchases)?[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
-    ]
-    for pat in patrones_apr:
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            resultados.apr = _extraer_float(m)
-            break
-
-    m = re.search(r"Penalty\s+APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%", texto, re.IGNORECASE)
-    if m:
-        resultados.penalty_apr = _extraer_float(m)
-    if resultados.penalty_apr is None:
-        m = re.search(r"Tasa\s+moratoria[:\s]*([\d]+(?:[.,]\d+)?)\s*%", texto, re.IGNORECASE)
-        if m:
-            resultados.penalty_apr = _extraer_float(m)
-
-    for pat in (
-        r"Late\s+(?:Payment\s+)?Fee[:\s]*(?:up\s+to\s+)?\$?([\d]+(?:[.,]\d+)?)",
-        r"Comisi[oó]n\s+por\s+pago\s+tard[ií]o[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-        r"Comisi[oó]n\s+por\s+atraso[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            resultados.late_fee = _extraer_float(m)
-            break
-
-    for pat in (
-        r"Annual\s+Fee[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-        r"Anualidad[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            resultados.annual_fee = _extraer_float(m)
-            break
-
-    m = re.search(r"Daily\s+Periodic\s+Rate[:\s]*([\d]+(?:[.,]\d+)?)\s*%", texto, re.IGNORECASE)
-    if m:
-        resultados.daily_rate = _extraer_float(m)
-
-    for pat in (
-        r"Finance\s+Charge[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-        r"Interest\s+Charged[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-        r"Intereses\s+(?:del\s+periodo|cargo)[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-        r"Inter[eé]s\s+cobrado[:\s]*\$?([\d]+(?:[.,]\d+)?)",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            resultados.finance_charge = _extraer_float(m)
-            break
-
-    return resultados
+    return ResultadosOCR.desde_datos_captura(extraer_datos_captura(texto))
 
 
 def procesar_captura(imagen: Image.Image, texto_manual: str = "") -> ResultadosOCR:
-    texto_ocr = _texto_desde_imagen(imagen)
-    texto = "\n".join(p for p in (texto_ocr, texto_manual) if p.strip())
-    return extraer_datos_financieros(texto)
+    from app.core.ocr_captura import procesar_imagen_y_texto
+
+    return ResultadosOCR.desde_datos_captura(procesar_imagen_y_texto(imagen, texto_manual))
 
 
 def generar_resumen(resultados: ResultadosOCR) -> None:
@@ -273,11 +228,24 @@ def generar_resumen(resultados: ResultadosOCR) -> None:
         st.warning(t("ayuda_bancos.sin_datos"))
         return
 
+    if resultados.limite is not None:
+        st.markdown(f"- Límite: **{resultados.limite:,.2f}**")
+    if resultados.saldo is not None:
+        st.markdown(f"- Saldo / adeudado: **{resultados.saldo:,.2f}**")
+    if resultados.disponible is not None:
+        st.markdown(f"- Disponible: **{resultados.disponible:,.2f}**")
+    if resultados.dia_corte is not None:
+        st.markdown(f"- Día de corte: **{resultados.dia_corte}**")
+    if resultados.dia_pago is not None:
+        st.markdown(f"- Día de pago: **{resultados.dia_pago}**")
+    if resultados.ultimos_digitos:
+        st.markdown(f"- Últimos 4: **{resultados.ultimos_digitos}**")
+
     if resultados.late_fee is not None or resultados.finance_charge is not None:
         st.markdown(t("ayuda_bancos.interpretacion_cargos"))
     elif resultados.penalty_apr is not None:
         st.markdown(t("ayuda_bancos.interpretacion_mora"))
-    else:
+    elif resultados.apr is not None:
         st.markdown(t("ayuda_bancos.interpretacion_tasas"))
 
     if resultados.late_fee is not None:

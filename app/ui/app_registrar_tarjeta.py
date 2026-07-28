@@ -17,6 +17,7 @@ from app.core.tarjetas import EstiloTarjeta, Tarjeta, guardar_tarjeta
 from app.i18n.translator import t
 from app.ui.form_intereses import render_campos_intereses
 from app.ui.helpers import language_selector
+from app.ui.ocr_registro import render_ocr_para_registro
 
 NOMBRES_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
 PREF_VALS = ["app", "web"]
@@ -25,6 +26,8 @@ PREF_VALS = ["app", "web"]
 def render(on_back, on_saved) -> None:
     language_selector()
     st.title(t("pantalla_registrar_tarjeta.titulo"))
+
+    render_ocr_para_registro()
 
     banco = select_with_add(
         t("pantalla_registrar_tarjeta.banco"),

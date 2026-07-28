@@ -51,9 +51,8 @@ _DEFAULT_NOTIF: dict[str, Any] = {
 
 
 def _is_streamlit_cloud() -> bool:
-    return os.path.isdir("/mount/src") or bool(
-        os.environ.get("STREAMLIT_RUNTIME_ENV", "").strip()
-    )
+    """Solo Community Cloud (repo montado en /mount/src)."""
+    return os.path.isdir("/mount/src")
 
 
 def use_browser_storage() -> bool:

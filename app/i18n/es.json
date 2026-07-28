@@ -86,7 +86,20 @@
     "error_campos": "Completa todos los campos obligatorios.",
     "error_limite": "El límite debe ser mayor a cero.",
     "error_adeudado": "El monto adeudado no puede superar el límite.",
-    "exito": "Tarjeta guardada correctamente."
+    "exito": "Tarjeta guardada correctamente.",
+    "ocr_titulo": "Llenar desde captura o estado de cuenta",
+    "ocr_ayuda": "Sube una foto del estado de cuenta o pega el texto. TI intenta leer corte, pago, saldo, límite y dígitos. Revisa siempre antes de guardar.",
+    "ocr_uploader": "Foto o captura (JPG/PNG)",
+    "ocr_texto_manual": "O pega aquí el texto del estado de cuenta",
+    "ocr_texto_placeholder": "Ej.: Fecha de corte: 11/07/2026 … Límite: $10,000 …",
+    "ocr_analizar": "Leer e interpretar",
+    "ocr_resultado": "Datos detectados",
+    "ocr_ver_texto": "Ver texto leído",
+    "ocr_usar": "Usar estos datos en el formulario",
+    "ocr_aplicado": "Campos rellenados. Revísalos y completa banco/nombre si faltan.",
+    "ocr_fallo": "No se pudo leer la imagen. Pega el texto manualmente y vuelve a analizar.",
+    "ocr_sin_campos": "Se leyó texto, pero no se reconocieron campos. Ajusta el texto o completa a mano.",
+    "ocr_imagen_invalida": "No se pudo mostrar la imagen."
   },
   "pantalla_lista_tarjetas": {
     "titulo": "Mis tarjetas",

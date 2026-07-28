@@ -58,10 +58,7 @@ def main() -> None:
             if warn:
                 st.error(warn)
         else:
-            st.warning(
-                "Modo Lab (disco del servidor): todos ven el mismo PIN/datos. "
-                "En Streamlit Cloud quita el secret TI_USE_FILESYSTEM y redespliega."
-            )
+            st.info("Modo Lab: usando archivos en app/data/ (PIN y tarjetas de este PC).")
         render_pin_gate(unlock)
         return
 
