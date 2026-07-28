@@ -41,10 +41,22 @@ def main() -> None:
 
     if not st.session_state.unlocked:
         if use_browser_storage():
-            st.success(
-                "Modo piloto: tus datos van con este enlace (?ti=…). "
-                "Guarda la página en favoritos o no borres el link de la barra."
-            )
+            from app.core.browser_store import has_url_state
+
+            if has_url_state():
+                st.success(
+                    "Tus datos están en este enlace (se ve &s= en la barra). "
+                    "Usa SIEMPRE este favorito para volver."
+                )
+            else:
+                st.warning(
+                    "Paso importante: crea tu PIN, luego mira la barra de direcciones. "
+                    "Cuando aparezca &s= (enlace más largo), VUELVE a guardar ese favorito. "
+                    "Si guardas solo ?ti= sin &s=, al volver te pedirá crear PIN otra vez."
+                )
+            warn = st.session_state.get("ti_url_state_warn")
+            if warn:
+                st.error(warn)
         else:
             st.warning(
                 "Modo Lab (disco del servidor): todos ven el mismo PIN/datos. "
@@ -52,6 +64,13 @@ def main() -> None:
             )
         render_pin_gate(unlock)
         return
+
+    if st.session_state.pop("ti_pedir_guardar_favorito", False):
+        st.warning(
+            "PIN creado. Mira la barra de direcciones: debe verse **&s=** (enlace largo). "
+            "Guarda ESE favorito ahora (borra el anterior si solo tenía ?ti=). "
+            "Si no, al volver te pedirá crear PIN otra vez."
+        )
 
     if st.session_state.get("notificaciones_enviadas_fecha") != hoy().isoformat():
         ejecutar_notificaciones_diarias()

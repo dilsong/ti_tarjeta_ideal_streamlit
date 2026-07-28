@@ -1,33 +1,26 @@
-# Piloto Streamlit — data por dispositivo
+# Piloto Streamlit — data en el enlace
 
-## Qué cambió
+## Cómo funciona (Cloud)
 
-La app guarda **tarjetas, pagos, consumos, PIN e idioma** por dispositivo.
+Streamlit Cloud **borra** los archivos temporales entre visitas.
+Por eso tus datos (PIN, tarjetas, etc.) van **dentro del enlace**:
 
-En Streamlit Cloud el `localStorage` del navegador **no sirve** (queda aislado
-en un iframe). En su lugar:
+`https://….streamlit.app/?ti=….&s=….`
 
-- Cada piloto recibe un ID en la URL: `?ti=...`
-- Sus datos se guardan en un archivo propio en el servidor (no en GitHub)
-- **Hay que reabrir el mismo enlace** (con `?ti=`) o guardarlo en favoritos
+- `ti` = id del dispositivo  
+- `s` = tus datos comprimidos  
 
-## Cómo correr el piloto
+## Pasos para el piloto
 
-```powershell
-cd c:\ti_tarjeta_ideal
-pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
+1. Abre el link de la app.
+2. Crea el PIN.
+3. Mira la barra: debe aparecer **`&s=`** (el link se alarga).
+4. **Guarda ese favorito de nuevo** (no el link corto solo con `?ti=`).
+5. Para volver, abre **ese** favorito → te pedirá desbloquear, no crear PIN.
 
-En Cloud: sube el repo; el archivo `packages.txt` instala Tesseract para OCR.
+Si abres el link corto sin `&s=`, la app cree que eres nuevo.
 
-## Importante para pilotos
-
-1. Tras crear el PIN, **guarda la URL completa** (debe verse `?ti=` en la barra).
-2. Si abres solo el link corto sin `?ti=`, la app cree que eres un dispositivo nuevo.
-3. Usa Ayuda → exportar ZIP como respaldo.
-
-## Lab en tu PC (archivos JSON compartidos)
+## Lab en PC
 
 ```powershell
 $env:TI_USE_FILESYSTEM="1"
@@ -36,5 +29,4 @@ streamlit run streamlit_app.py
 
 ## Soporte
 
-El ZIP de Ayuda exporta la data del dispositivo actual (sin PIN).
-Importar el ZIP restaura en ese mismo dispositivo (`?ti=`).
+Exporta ZIP desde Ayuda como respaldo extra.

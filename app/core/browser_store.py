@@ -1,17 +1,21 @@
 """
 Persistencia por dispositivo (modo piloto).
 
-Cada piloto tiene un ID en la URL (?ti=...) y un archivo JSON propio.
-En Streamlit Cloud el localStorage de componentes NO persiste (iframe),
-por eso usamos disco escribible + ID en el enlace.
+En Streamlit Cloud el disco (/tmp) y localStorage NO sirven entre visitas.
+La fuente de verdad es el propio enlace:
 
-- Cloud: /tmp/ti_tarjeta_ideal_devices/{id}.json
-- Local piloto: app/data/devices/{id}.json
-- Lab compartido: TI_USE_FILESYSTEM=1 → app/data/*.json (sin ID)
+  ?ti=<id>&s=<datos comprimidos>
+
+El usuario debe guardar en favoritos el enlace DESPUÉS de crear el PIN
+(cuando ya aparece &s=…), porque ahí van sus datos.
+
+Lab compartido: TI_USE_FILESYSTEM=1 → app/data/*.json
 """
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
 import os
 import re
@@ -23,8 +27,12 @@ from typing import Any
 _SESSION_BUNDLE = "ti_local_bundle"
 _SESSION_HYDRATED = "ti_local_hydrated"
 _SESSION_DEVICE = "ti_device_id"
+_SESSION_URL_WARN = "ti_url_state_warn"
 _DEVICE_PARAM = "ti"
+_STATE_PARAM = "s"
 _DEVICE_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+# Límite práctico de URL en móviles; si se pasa, avisamos.
+_MAX_STATE_CHARS = 7000
 
 _DEFAULT_NOTIF: dict[str, Any] = {
     "notificar_dia_corte": True,
@@ -43,7 +51,6 @@ _DEFAULT_NOTIF: dict[str, Any] = {
 
 
 def _is_streamlit_cloud() -> bool:
-    """Community Cloud monta el repo en /mount/src."""
     return os.path.isdir("/mount/src") or bool(
         os.environ.get("STREAMLIT_RUNTIME_ENV", "").strip()
     )
@@ -58,7 +65,6 @@ def use_browser_storage() -> bool:
 
 
 def empty_bundle() -> dict[str, Any]:
-    """Estructura en blanco alineada con tarjetas/pagos/consumos/config del Lab."""
     return {
         "version": 1,
         "tarjetas": [],
@@ -113,64 +119,143 @@ def _valid_device_id(value: str) -> bool:
     return bool(_DEVICE_ID_RE.match(value or ""))
 
 
-def _read_query_device_id() -> str:
+def _qp_get(name: str) -> str:
     import streamlit as st
 
-    raw = st.query_params.get(_DEVICE_PARAM, "")
+    raw = st.query_params.get(name, "")
     if isinstance(raw, list):
         raw = raw[0] if raw else ""
-    return str(raw).strip().lower()
+    return str(raw).strip()
+
+
+def _slim_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Quita historial voluminoso para caber en la URL."""
+    slim = merge_with_defaults(bundle)
+    notif = dict(slim.get("notificaciones") or {})
+    notif["historial_enviados"] = []
+    slim["notificaciones"] = notif
+    return slim
+
+
+def encode_bundle_to_token(bundle: dict[str, Any]) -> str:
+    raw = json.dumps(_slim_bundle(bundle), separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
+    token = base64.urlsafe_b64encode(gzip.compress(raw, compresslevel=9)).decode("ascii")
+    return token.rstrip("=")
+
+
+def decode_token_to_bundle(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    try:
+        pad = "=" * (-len(token) % 4)
+        raw = gzip.decompress(base64.urlsafe_b64decode(token + pad))
+        parsed = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return merge_with_defaults(parsed)
 
 
 def ensure_device_id() -> str:
-    """Obtiene o crea el ID del dispositivo y lo deja en la URL (?ti=...)."""
     import streamlit as st
 
     existing = st.session_state.get(_SESSION_DEVICE)
     if isinstance(existing, str) and _valid_device_id(existing):
-        if _read_query_device_id() != existing:
+        if _qp_get(_DEVICE_PARAM).lower() != existing:
             st.query_params[_DEVICE_PARAM] = existing
         return existing
 
-    from_url = _read_query_device_id()
-    if _valid_device_id(from_url):
-        device_id = from_url
-    else:
-        device_id = uuid.uuid4().hex
-
+    from_url = _qp_get(_DEVICE_PARAM).lower()
+    device_id = from_url if _valid_device_id(from_url) else uuid.uuid4().hex
     st.session_state[_SESSION_DEVICE] = device_id
-    if _read_query_device_id() != device_id:
+    if _qp_get(_DEVICE_PARAM).lower() != device_id:
         st.query_params[_DEVICE_PARAM] = device_id
     return device_id
 
 
-def _load_device_file(device_id: str) -> dict[str, Any]:
+def _load_device_file(device_id: str) -> dict[str, Any] | None:
     path = _device_path(device_id)
     if not path.exists():
-        return empty_bundle()
+        return None
     try:
         with path.open(encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError, TypeError):
-        return empty_bundle()
-    return merge_with_defaults(raw if isinstance(raw, dict) else None)
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return merge_with_defaults(raw)
 
 
 def _save_device_file(device_id: str, bundle: dict[str, Any]) -> None:
-    path = _device_path(device_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = merge_with_defaults(bundle)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    tmp.replace(path)
+    """Caché local opcional; en Cloud puede borrarse al dormir la app."""
+    try:
+        path = _device_path(device_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = merge_with_defaults(bundle)
+        tmp = path.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _sync_state_to_url(bundle: dict[str, Any]) -> bool:
+    """Escribe ?s= en la URL. True si cupo; False si es demasiado grande."""
+    import streamlit as st
+
+    token = encode_bundle_to_token(bundle)
+    if len(token) > _MAX_STATE_CHARS:
+        st.session_state[_SESSION_URL_WARN] = (
+            "Tus datos son demasiado grandes para guardar en el enlace. "
+            "Exporta un ZIP desde Ayuda como respaldo."
+        )
+        return False
+
+    st.session_state.pop(_SESSION_URL_WARN, None)
+    if _qp_get(_STATE_PARAM) != token:
+        st.query_params[_STATE_PARAM] = token
+    return True
+
+
+def current_bookmark_url() -> str:
+    """URL completa recomendada para favoritos (si el navegador la expone)."""
+    import streamlit as st
+
+    try:
+        # Disponible en versiones recientes de Streamlit
+        from urllib.parse import urlencode
+
+        base = ""
+        if hasattr(st, "context") and getattr(st.context, "headers", None):
+            host = st.context.headers.get("Host") or st.context.headers.get("host")
+            proto = st.context.headers.get("X-Forwarded-Proto") or "https"
+            if host:
+                base = f"{proto}://{host}/"
+        params = {}
+        ti = _qp_get(_DEVICE_PARAM)
+        s = _qp_get(_STATE_PARAM)
+        if ti:
+            params[_DEVICE_PARAM] = ti
+        if s:
+            params[_STATE_PARAM] = s
+        if base and params:
+            return base + "?" + urlencode(params)
+    except Exception:
+        pass
+    return ""
+
+
+def has_url_state() -> bool:
+    return bool(_qp_get(_STATE_PARAM))
 
 
 def hydrate_from_localstorage() -> None:
-    """
-    Carga el bundle del dispositivo (?ti=) al iniciar.
-    Mantiene el nombre histórico; ya no usa localStorage del navegador.
-    """
+    """Carga el bundle desde ?s= (prioridad) o archivo local de respaldo."""
     import streamlit as st
 
     if not use_browser_storage():
@@ -181,12 +266,21 @@ def hydrate_from_localstorage() -> None:
         return
 
     device_id = ensure_device_id()
-    bundle = _load_device_file(device_id)
+    from_url = decode_token_to_bundle(_qp_get(_STATE_PARAM))
+    from_file = _load_device_file(device_id)
+
+    if from_url is not None:
+        bundle = from_url
+    elif from_file is not None:
+        bundle = from_file
+        # Recupera a la URL para que el favorito futuro sí persista
+        _sync_state_to_url(bundle)
+    else:
+        bundle = empty_bundle()
+
     st.session_state[_SESSION_BUNDLE] = bundle
     st.session_state[_SESSION_HYDRATED] = True
-    # Si es la primera vez, materializa el archivo vacío
-    if not _device_path(device_id).exists():
-        _save_device_file(device_id, bundle)
+    _save_device_file(device_id, bundle)
 
 
 def get_bundle() -> dict[str, Any]:
@@ -198,7 +292,6 @@ def get_bundle() -> dict[str, Any]:
 
 
 def replace_bundle(bundle: dict[str, Any]) -> None:
-    """Reemplaza el bundle completo (p. ej. importar ZIP) y persiste."""
     import streamlit as st
 
     merged = merge_with_defaults(bundle)
@@ -207,7 +300,6 @@ def replace_bundle(bundle: dict[str, Any]) -> None:
 
 
 def set_section(section: str, data: Any) -> None:
-    """Actualiza una sección del bundle y la persiste en disco del dispositivo."""
     import streamlit as st
 
     bundle = get_bundle()
@@ -217,16 +309,14 @@ def set_section(section: str, data: Any) -> None:
 
 
 def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
-    """Persiste el bundle del dispositivo actual (nombre histórico)."""
+    """Persiste en la URL (?s=) y en caché de archivo."""
     if not use_browser_storage():
         return
 
     device_id = ensure_device_id()
     payload_obj = bundle if bundle is not None else get_bundle()
+    _sync_state_to_url(payload_obj)
     _save_device_file(device_id, payload_obj)
-
-
-# --- API usada por tarjetas / pagos / consumos / config / notificaciones ---
 
 
 def read_tarjetas() -> list[dict[str, Any]]:

@@ -382,9 +382,9 @@ def _render_crear_pin(on_unlock) -> None:
             if pin2 != st.session_state.get("pin_temp", ""):
                 error.error(t("pantalla_pin.error_pin_no_coincide"))
             elif crear_pin(pin2):
-                st.success(t("pantalla_pin.exito_pin"))
                 st.session_state.pop("pin_step", None)
                 st.session_state.pop("pin_temp", None)
+                st.session_state["ti_pedir_guardar_favorito"] = True
                 on_unlock()
             else:
                 error.error(t("pantalla_pin.error_pin_corto"))
