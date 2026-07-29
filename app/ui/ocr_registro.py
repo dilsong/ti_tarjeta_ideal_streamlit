@@ -1,5 +1,6 @@
 """
 Bloque OCR al registrar tarjeta: captura → texto → rellenar formulario.
+La foto es la vía preferida; pegar texto es respaldo.
 """
 
 from __future__ import annotations
@@ -29,21 +30,56 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
         st.session_state["corte"] = str(datos.dia_corte)
     if datos.dia_pago is not None:
         st.session_state["pago"] = str(datos.dia_pago)
+    if datos.nombre_tarjeta:
+        st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
+    if datos.pago_minimo is not None:
+        st.session_state["reg_pago_manual_on"] = True
+        st.session_state["reg_pago_manual_val"] = float(datos.pago_minimo)
     if datos.apr is not None:
         st.session_state["reg_tasa_anual"] = float(datos.apr)
         st.session_state["reg_usar_mora"] = datos.penalty_apr is not None
     if datos.penalty_apr is not None:
         st.session_state["reg_tasa_mora"] = float(datos.penalty_apr)
 
+    texto = (datos.texto_crudo or "").lower()
+    sugeridos = [
+        ("capital one", "Capital One"),
+        ("credit one", "Credit One"),
+        ("bank of america", "Bank of America"),
+        ("wells fargo", "Wells Fargo"),
+        ("american express", "American Express"),
+        ("bbva", "BBVA"),
+        ("banorte", "Banorte"),
+        ("santander", "Santander"),
+        ("scotiabank", "Scotiabank"),
+        ("inbursa", "Inbursa"),
+        ("chase", "Chase"),
+        ("discover", "Discover"),
+        ("citi", "Citi"),
+        ("hsbc", "HSBC"),
+    ]
+    for needle, banco in sugeridos:
+        if needle in texto:
+            st.session_state["swa_sel_banco"] = banco
+            break
+
 
 def _mostrar_resumen(datos: DatosCaptura) -> None:
     filas: list[str] = []
+    if datos.nombre_tarjeta:
+        filas.append(
+            f"- **{t('pantalla_registrar_tarjeta.nombre_tarjeta')}:** {datos.nombre_tarjeta}"
+        )
     if datos.limite is not None:
         filas.append(f"- **{t('pantalla_registrar_tarjeta.limite')}:** {datos.limite:,.2f}")
     if datos.saldo is not None:
         filas.append(f"- **{t('pantalla_registrar_tarjeta.adeudado')}:** {datos.saldo:,.2f}")
     if datos.disponible is not None:
         filas.append(f"- **{t('pantalla_lista_tarjetas.disponible')}:** {datos.disponible:,.2f}")
+    if datos.pago_minimo is not None:
+        filas.append(f"- **Pago mínimo:** {datos.pago_minimo:,.2f}")
+    if datos.late_fee is not None:
+        filas.append(f"- **Cargo por atraso (hasta):** {datos.late_fee:,.2f}")
     if datos.dia_corte is not None:
         filas.append(f"- **{t('pantalla_registrar_tarjeta.fecha_corte')}:** {datos.dia_corte}")
     if datos.dia_pago is not None:
@@ -62,10 +98,12 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
 
 def render_ocr_para_registro() -> None:
     """Expander al inicio de Nueva tarjeta."""
-    with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=False):
+    with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=True):
         st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda"))
-        if not ocr_disponible():
-            st.info(t("ayuda_bancos.ocr_no_disponible"))
+        if ocr_disponible():
+            st.success(t("pantalla_registrar_tarjeta.ocr_listo"))
+        else:
+            st.warning(t("pantalla_registrar_tarjeta.ocr_instalar_lab"))
 
         captura = st.file_uploader(
             t("pantalla_registrar_tarjeta.ocr_uploader"),
@@ -102,7 +140,9 @@ def render_ocr_para_registro() -> None:
             datos = procesar_imagen_y_texto(imagen, texto_manual or "")
             st.session_state[_SESSION_OCR] = datos.to_dict()
             st.session_state[_SESSION_OCR_TEXTO] = datos.texto_crudo
-            if not datos.texto_crudo.strip() and captura and not (texto_manual or "").strip():
+            if captura and not ocr_disponible() and not (texto_manual or "").strip():
+                st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
+            elif not datos.texto_crudo.strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.tiene_datos_tarjeta() and not datos.tiene_tasas():
                 st.warning(t("pantalla_registrar_tarjeta.ocr_sin_campos"))
