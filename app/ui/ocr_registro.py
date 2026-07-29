@@ -20,16 +20,22 @@ _SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
 
 def _aplicar_a_formulario(datos: DatosCaptura) -> None:
     """Rellena keys del formulario de alta (antes del rerun)."""
-    if datos.limite is not None:
-        st.session_state["limite"] = f"{datos.limite:.2f}"
-    if datos.saldo is not None:
-        st.session_state["adeudado"] = f"{datos.saldo:.2f}"
+    limite = datos.limite
+    saldo = datos.saldo
+    # Salvaguarda: adeudado nunca debe superar el límite
+    if limite is not None and saldo is not None and saldo > limite:
+        limite, saldo = saldo, limite
+
+    if limite is not None:
+        st.session_state["limite"] = f"{limite:.2f}"
+    if saldo is not None:
+        st.session_state["adeudado"] = f"{saldo:.2f}"
     if datos.ultimos_digitos:
         st.session_state["digitos"] = datos.ultimos_digitos
     if datos.dia_corte is not None:
-        st.session_state["corte"] = str(datos.dia_corte)
+        st.session_state["corte"] = str(int(datos.dia_corte))
     if datos.dia_pago is not None:
-        st.session_state["pago"] = str(datos.dia_pago)
+        st.session_state["pago"] = str(int(datos.dia_pago))
     if datos.nombre_tarjeta:
         st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
     if datos.pago_minimo is not None:

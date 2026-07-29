@@ -106,10 +106,9 @@ def render_gestion(tarjetas: list[Tarjeta], on_edit, on_add) -> None:
                 if st.button("›", key=f"cfg_edit_{tarjeta.id}", help=t("common.editar")):
                     on_edit(tarjeta.id)
 
-
+    st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
 
     if st.button(t("pantalla_inicio.boton_agregar_tarjeta"), key="cfg_add", type="primary", use_container_width=True):
-
         on_add()
 
 

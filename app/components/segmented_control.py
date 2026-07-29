@@ -1,5 +1,8 @@
 """
 Control segmentado estilo iOS para Streamlit.
+
+Usa type primary/secondary porque el CSS sobre un <div> no envuelve el botón
+real de Streamlit (son nodos hermanos), y por eso no se veía la selección.
 """
 
 from __future__ import annotations
@@ -25,11 +28,19 @@ def segmented_control(
     cols = st.columns(len(options))
     for i, opt in enumerate(options):
         with cols[i]:
-            css = "seg-btn-active" if st.session_state[state_key] == i else "seg-btn"
-            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
-            if st.button(opt, key=f"{key}_seg_{i}"):
-                st.session_state[state_key] = i
-            st.markdown("</div>", unsafe_allow_html=True)
+            activo = int(st.session_state[state_key]) == i
+            if st.button(
+                opt,
+                key=f"{key}_seg_{i}",
+                type="primary" if activo else "secondary",
+                use_container_width=True,
+            ):
+                if int(st.session_state[state_key]) != i:
+                    st.session_state[state_key] = i
+                    st.rerun()
 
-    idx = st.session_state[state_key]
+    idx = int(st.session_state[state_key])
+    if idx < 0 or idx >= len(options):
+        idx = 0
+        st.session_state[state_key] = 0
     return idx, options[idx]

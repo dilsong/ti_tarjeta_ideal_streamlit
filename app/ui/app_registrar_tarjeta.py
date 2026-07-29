@@ -69,8 +69,8 @@ def render(on_back, on_saved) -> None:
     st.caption(t("pantalla_registrar_tarjeta.estilo"))
     estilo_idx, _ = segmented_control(estilo_opts, key="estilo")
 
-    corte = entero_text_input(t("pantalla_registrar_tarjeta.fecha_corte"), "corte", placeholder="21")
-    pago = entero_text_input(t("pantalla_registrar_tarjeta.fecha_pago"), "pago", placeholder="25")
+    corte = entero_text_input(t("pantalla_registrar_tarjeta.fecha_corte"), "corte", placeholder="15")
+    pago = entero_text_input(t("pantalla_registrar_tarjeta.fecha_pago"), "pago", placeholder="9")
 
     datos_int = render_campos_intereses("reg")
 

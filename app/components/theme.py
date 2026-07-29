@@ -10,6 +10,9 @@ CARD_COLORS = {
     "morado": "#7C3AED",
     "rojo": "#DC2626",
     "naranja": "#EA580C",
+    "amarillo": "#EAB308",
+    "rosado": "#DB2777",
+    "gris": "#6B7280",
     "negro": "#1F2937",
     "dorado": "#CA8A04",
 }
@@ -20,6 +23,9 @@ COLOR_EMOJI = {
     "morado": "🟣",
     "rojo": "🔴",
     "naranja": "🟠",
+    "amarillo": "🟡",
+    "rosado": "🩷",
+    "gris": "⚪",
     "dorado": "🟡",
     "negro": "⚫",
 }
@@ -35,7 +41,14 @@ def etiqueta_color_nombre(color_key: str, nombre: str) -> str:
 
 def gradiente_tarjeta(color_key: str) -> str:
     base = CARD_COLORS.get(color_key, CARD_COLORS["azul"])
-    fin = "#4B5563" if color_key == "negro" else "#111827"
+    if color_key in ("negro", "gris"):
+        fin = "#374151"
+    elif color_key in ("amarillo", "dorado"):
+        fin = "#713F12"
+    elif color_key == "rosado":
+        fin = "#9D174D"
+    else:
+        fin = "#111827"
     return f"linear-gradient(135deg,{base},{fin})"
 
 

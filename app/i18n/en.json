@@ -305,6 +305,9 @@
     "morado": "Purple",
     "rojo": "Red",
     "naranja": "Orange",
+    "amarillo": "Yellow",
+    "rosado": "Pink",
+    "gris": "Gray",
     "negro": "Black",
     "dorado": "Gold"
   },
