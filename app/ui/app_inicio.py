@@ -192,14 +192,33 @@ def _render_with_cards(on_navigate, on_edit) -> None:
         st.session_state["ti_main_tab"] = "mejor"
 
     st.markdown('<span class="ti-persist-tabs-marker"></span>', unsafe_allow_html=True)
-    active = st.radio(
-        "main_nav",
-        main_ids,
-        format_func=lambda tid: main_labels[tid],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="ti_main_tab",
-    )
+    c_nav, c_help = st.columns([10, 1], vertical_alignment="center")
+    with c_nav:
+        active = st.radio(
+            "main_nav",
+            main_ids,
+            format_func=lambda tid: main_labels[tid],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="ti_main_tab",
+        )
+    with c_help:
+        with st.popover("?"):
+            st.markdown(f"**{t('tabs.ayuda_mapa_titulo')}**")
+            st.markdown(f"- **{main_labels['mejor']}:** {t('tabs.ayuda_mejor')}")
+            st.markdown(f"- **{main_labels['tarjetas']}:** {t('tabs.ayuda_tarjetas')}")
+            st.markdown(f"- **{main_labels['guia']}:** {t('tabs.ayuda_guia')}")
+            st.markdown(f"- **{main_labels['config']}:** {t('tabs.ayuda_config')}")
+            st.markdown(f"- **{main_labels['reportes']}:** {t('tabs.ayuda_reportes')}")
+
+    ayudas = {
+        "mejor": t("tabs.ayuda_mejor"),
+        "tarjetas": t("tabs.ayuda_tarjetas"),
+        "guia": t("tabs.ayuda_guia"),
+        "config": t("tabs.ayuda_config"),
+        "reportes": t("tabs.ayuda_reportes"),
+    }
+    st.caption(ayudas.get(active, ""))
 
     if active == "mejor":
         tab_mejor_opcion.render(tarjetas, tarjeta_sel)

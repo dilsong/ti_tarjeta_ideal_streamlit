@@ -103,29 +103,35 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
 
 def render_ocr_para_registro() -> None:
     with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=True):
-        st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda"))
-        if ocr_disponible():
-            st.success(t("pantalla_registrar_tarjeta.ocr_listo"))
+        hay_ocr = ocr_disponible()
+        captura = None
+
+        if hay_ocr:
+            st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_con_foto"))
+            captura = st.file_uploader(
+                t("pantalla_registrar_tarjeta.ocr_uploader"),
+                type=["png", "jpg", "jpeg", "webp"],
+                key="reg_ocr_upload",
+            )
+            if captura:
+                try:
+                    st.image(Image.open(BytesIO(captura.getvalue())), use_container_width=True)
+                except Exception:
+                    st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
+            texto_manual = st.text_area(
+                t("pantalla_registrar_tarjeta.ocr_texto_manual"),
+                height=100,
+                key="reg_ocr_manual",
+                placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
+            )
         else:
-            st.warning(t("pantalla_registrar_tarjeta.ocr_instalar_lab"))
-
-        captura = st.file_uploader(
-            t("pantalla_registrar_tarjeta.ocr_uploader"),
-            type=["png", "jpg", "jpeg", "webp"],
-            key="reg_ocr_upload",
-        )
-        texto_manual = st.text_area(
-            t("pantalla_registrar_tarjeta.ocr_texto_manual"),
-            height=100,
-            key="reg_ocr_manual",
-            placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
-        )
-
-        if captura:
-            try:
-                st.image(Image.open(BytesIO(captura.getvalue())), use_container_width=True)
-            except Exception:
-                st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
+            st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
+            texto_manual = st.text_area(
+                t("pantalla_registrar_tarjeta.ocr_texto_manual_solo"),
+                height=120,
+                key="reg_ocr_manual",
+                placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
+            )
 
         puede = bool(captura or (texto_manual or "").strip())
         if st.button(
@@ -144,17 +150,14 @@ def render_ocr_para_registro() -> None:
             datos = procesar_imagen_y_texto(imagen, texto_manual or "")
             st.session_state[_SESSION_OCR] = datos.to_dict()
             st.session_state[_SESSION_OCR_TEXTO] = datos.texto_crudo
-            if captura and not ocr_disponible() and not (texto_manual or "").strip():
+            if captura and not hay_ocr and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.texto_crudo.strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.tiene_datos_tarjeta() and not datos.tiene_tasas():
                 st.warning(t("pantalla_registrar_tarjeta.ocr_sin_campos"))
                 if datos.texto_crudo.strip():
-                    st.info(
-                        "Se leyó texto de la imagen, pero no coincidió con etiquetas conocidas. "
-                        "Abre «Ver texto leído», copia lo importante al cuadro manual y vuelve a analizar."
-                    )
+                    st.info(t("pantalla_registrar_tarjeta.ocr_texto_sin_campos_hint"))
 
         raw = st.session_state.get(_SESSION_OCR)
         if raw:
@@ -163,7 +166,10 @@ def render_ocr_para_registro() -> None:
             _mostrar_resumen(datos)
             texto = st.session_state.get(_SESSION_OCR_TEXTO) or datos.texto_crudo
             if texto:
-                with st.expander(t("pantalla_registrar_tarjeta.ocr_ver_texto"), expanded=not datos.tiene_datos_tarjeta()):
+                with st.expander(
+                    t("pantalla_registrar_tarjeta.ocr_ver_texto"),
+                    expanded=not datos.tiene_datos_tarjeta(),
+                ):
                     st.text(texto)
             if st.button(
                 t("pantalla_registrar_tarjeta.ocr_usar"),

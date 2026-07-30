@@ -89,10 +89,13 @@
     "exito": "Card saved successfully.",
     "ocr_titulo": "Fill from photo or statement",
     "ocr_ayuda": "Best option: upload a clear statement photo. TI reads the image on the server (not the phone OCR). If that fails, paste the text as a fallback and review before saving.",
+    "ocr_ayuda_con_foto": "Upload a statement photo or paste the text. Review the data before saving.",
+    "ocr_ayuda_solo_texto": "Paste the statement text. TI will interpret it and fill the form.",
     "ocr_listo": "Image OCR is ready on this machine. Prefer using the photo.",
     "ocr_instalar_lab": "Image OCR is not on this PC. In Lab install Tesseract (winget install UB-Mannheim.TesseractOCR), close the terminal and restart Streamlit. Meanwhile you can paste text. On Streamlit Cloud photos work after redeploy.",
-    "ocr_uploader": "Statement photo or screenshot (JPG/PNG) — recommended",
-    "ocr_texto_manual": "Fallback: paste text if the photo could not be read",
+    "ocr_uploader": "Statement photo or screenshot (JPG/PNG)",
+    "ocr_texto_manual": "Or paste statement text here",
+    "ocr_texto_manual_solo": "Paste statement text here",
     "ocr_texto_placeholder": "E.g. Closing date: 07/11/2026 … Credit limit: $10,000 …",
     "ocr_analizar": "Read and interpret",
     "ocr_resultado": "Detected fields",
@@ -101,6 +104,7 @@
     "ocr_aplicado": "Fields filled. Review them and complete anything missing before saving.",
     "ocr_fallo": "Could not read the image. Paste the text manually and analyze again.",
     "ocr_sin_campos": "Text was read, but no fields matched. Adjust the text or fill manually.",
+    "ocr_texto_sin_campos_hint": "Open «View extracted text», copy the key lines into the text box and analyze again.",
     "ocr_imagen_invalida": "Could not display the image."
   },
   "pantalla_lista_tarjetas": {
@@ -243,7 +247,13 @@
     "umbral_guardar": "Save thresholds",
     "umbral_guardado": "Thresholds saved.",
     "umbral_activo_pct": "Excluded if usage ≥ {pct:.0f}%",
-    "umbral_activo_min": "Excluded if available < ${monto:,.2f}"
+    "umbral_activo_min": "Excluded if available < ${monto:,.2f}",
+    "ayuda_mapa_titulo": "What does each tab do?",
+    "ayuda_mejor": "Simulate a purchase and see which card fits best today.",
+    "ayuda_tarjetas": "Status, limit usage, dates, payments and history for the fan card.",
+    "ayuda_guia": "How to get rates and fees from your bank (photo or statement text).",
+    "ayuda_config": "Add/edit cards, thresholds, cycle alerts and support.",
+    "ayuda_reportes": "Summaries, comparisons and printouts of your cards."
   },
   "config_tarjetas": {
     "titulo": "Configure Cards",
