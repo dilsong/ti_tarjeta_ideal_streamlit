@@ -9,7 +9,7 @@
   "notificar_despues_pago": true,
   "notificar_dias_despues_corte": true,
   "notificar_inicio_ciclo": true,
-  "ultima_ejecucion": "2026-07-29",
+  "ultima_ejecucion": "2026-07-30",
   "historial_enviados": [
     {
       "clave": "76b1ebd7-55ce-4a0e-a897-cb2951cfdeb3:antes_corte:2026-06-30",
@@ -79,6 +79,21 @@
     {
       "clave": "db9bcb31-a886-4fce-b384-e3ba039432f9:despues_pago:2026-07-29",
       "fecha": "2026-07-29",
+      "tipo": "despues_pago"
+    },
+    {
+      "clave": "2fa5c08f-2ac8-484e-b53e-963907aa1c57:despues_pago:2026-07-30",
+      "fecha": "2026-07-30",
+      "tipo": "despues_pago"
+    },
+    {
+      "clave": "76b1ebd7-55ce-4a0e-a897-cb2951cfdeb3:corte:2026-07-30",
+      "fecha": "2026-07-30",
+      "tipo": "corte"
+    },
+    {
+      "clave": "db9bcb31-a886-4fce-b384-e3ba039432f9:despues_pago:2026-07-30",
+      "fecha": "2026-07-30",
       "tipo": "despues_pago"
     }
   ]

@@ -43,7 +43,7 @@ def render(on_back, on_saved) -> None:
         categoria="nombres_tarjeta",
     )
 
-    limite = monto_text_input(t("pantalla_registrar_tarjeta.limite"), "limite", placeholder="2000.00")
+    limite = monto_text_input(t("pantalla_registrar_tarjeta.limite"), "limite", placeholder="0.00")
     adeudado = monto_text_input(t("pantalla_registrar_tarjeta.adeudado"), "adeudado", placeholder="0.00")
 
     digitos = st.text_input(

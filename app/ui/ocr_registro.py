@@ -19,23 +19,19 @@ _SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
 
 
 def _aplicar_a_formulario(datos: DatosCaptura) -> None:
-    """Rellena keys del formulario de alta (antes del rerun)."""
+    """Rellena el formulario y borra valores viejos (p. ej. $2000 fantasma)."""
     limite = datos.limite
     saldo = datos.saldo
-    # Salvaguarda: adeudado nunca debe superar el límite
     if limite is not None and saldo is not None and saldo > limite:
         limite, saldo = saldo, limite
 
-    if limite is not None:
-        st.session_state["limite"] = f"{limite:.2f}"
-    if saldo is not None:
-        st.session_state["adeudado"] = f"{saldo:.2f}"
-    if datos.ultimos_digitos:
-        st.session_state["digitos"] = datos.ultimos_digitos
-    if datos.dia_corte is not None:
-        st.session_state["corte"] = str(int(datos.dia_corte))
-    if datos.dia_pago is not None:
-        st.session_state["pago"] = str(int(datos.dia_pago))
+    # Siempre sobrescribir estos campos al aplicar OCR (evita $2000 / fechas viejas)
+    st.session_state["limite"] = f"{limite:.2f}" if limite is not None else ""
+    st.session_state["adeudado"] = f"{saldo:.2f}" if saldo is not None else ""
+    st.session_state["digitos"] = datos.ultimos_digitos or ""
+    st.session_state["corte"] = str(int(datos.dia_corte)) if datos.dia_corte is not None else ""
+    st.session_state["pago"] = str(int(datos.dia_pago)) if datos.dia_pago is not None else ""
+
     if datos.nombre_tarjeta:
         st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
     if datos.pago_minimo is not None:
@@ -49,8 +45,8 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
 
     texto = (datos.texto_crudo or "").lower()
     sugeridos = [
-        ("capital one", "Capital One"),
         ("credit one", "Credit One"),
+        ("capital one", "Capital One"),
         ("bank of america", "Bank of America"),
         ("wells fargo", "Wells Fargo"),
         ("american express", "American Express"),
@@ -77,15 +73,18 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
             f"- **{t('pantalla_registrar_tarjeta.nombre_tarjeta')}:** {datos.nombre_tarjeta}"
         )
     if datos.limite is not None:
-        filas.append(f"- **{t('pantalla_registrar_tarjeta.limite')}:** {datos.limite:,.2f}")
+        filas.append(f"- **{t('pantalla_registrar_tarjeta.limite')}:** ${datos.limite:,.2f}")
     if datos.saldo is not None:
-        filas.append(f"- **{t('pantalla_registrar_tarjeta.adeudado')}:** {datos.saldo:,.2f}")
+        filas.append(f"- **{t('pantalla_registrar_tarjeta.adeudado')}:** ${datos.saldo:,.2f}")
     if datos.disponible is not None:
-        filas.append(f"- **{t('pantalla_lista_tarjetas.disponible')}:** {datos.disponible:,.2f}")
+        filas.append(f"- **{t('pantalla_lista_tarjetas.disponible')}:** ${datos.disponible:,.2f}")
     if datos.pago_minimo is not None:
-        filas.append(f"- **Pago mínimo:** {datos.pago_minimo:,.2f}")
+        filas.append(f"- **Pago mínimo:** ${datos.pago_minimo:,.2f}")
     if datos.late_fee is not None:
-        filas.append(f"- **Cargo por atraso (hasta):** {datos.late_fee:,.2f}")
+        filas.append(
+            f"- **Cargo por atraso (hasta):** ${datos.late_fee:,.2f} "
+            f"— _no es la tasa de interés anual_"
+        )
     if datos.dia_corte is not None:
         filas.append(f"- **{t('pantalla_registrar_tarjeta.fecha_corte')}:** {datos.dia_corte}")
     if datos.dia_pago is not None:
@@ -103,7 +102,6 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
 
 
 def render_ocr_para_registro() -> None:
-    """Expander al inicio de Nueva tarjeta."""
     with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=True):
         st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda"))
         if ocr_disponible():
@@ -152,6 +150,11 @@ def render_ocr_para_registro() -> None:
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.tiene_datos_tarjeta() and not datos.tiene_tasas():
                 st.warning(t("pantalla_registrar_tarjeta.ocr_sin_campos"))
+                if datos.texto_crudo.strip():
+                    st.info(
+                        "Se leyó texto de la imagen, pero no coincidió con etiquetas conocidas. "
+                        "Abre «Ver texto leído», copia lo importante al cuadro manual y vuelve a analizar."
+                    )
 
         raw = st.session_state.get(_SESSION_OCR)
         if raw:
@@ -160,13 +163,14 @@ def render_ocr_para_registro() -> None:
             _mostrar_resumen(datos)
             texto = st.session_state.get(_SESSION_OCR_TEXTO) or datos.texto_crudo
             if texto:
-                with st.expander(t("pantalla_registrar_tarjeta.ocr_ver_texto")):
+                with st.expander(t("pantalla_registrar_tarjeta.ocr_ver_texto"), expanded=not datos.tiene_datos_tarjeta()):
                     st.text(texto)
             if st.button(
                 t("pantalla_registrar_tarjeta.ocr_usar"),
                 type="primary",
                 use_container_width=True,
                 key="reg_ocr_usar",
+                disabled=not datos.tiene_datos_tarjeta(),
             ):
                 _aplicar_a_formulario(datos)
                 st.success(t("pantalla_registrar_tarjeta.ocr_aplicado"))
