@@ -12,12 +12,17 @@ from app.i18n.translator import t
 def mostrar_desglose(desglose: DesgloseProximoCiclo) -> None:
     st.markdown(f"**{t('intereses.desglose_titulo')}**")
     st.caption(t("intereses.desglose_subtitulo"))
-    st.markdown(
-        f"- **${desglose.saldo_arrastrado:,.2f}** — {t('intereses.desglose_arrastre')}\n\n"
-        f"- **${desglose.consumos_ciclo:,.2f}** — {t('intereses.desglose_consumos')}\n\n"
-        f"- **${desglose.interes_estimado:,.2f}** — {t('intereses.desglose_interes')}\n\n"
-        f"- **${desglose.interes_mora:,.2f}** — {t('intereses.desglose_mora')}"
-    )
+    lineas = [
+        f"- **${desglose.saldo_arrastrado:,.2f}** — {t('intereses.desglose_arrastre')}",
+        f"- **${desglose.consumos_ciclo:,.2f}** — {t('intereses.desglose_consumos')}",
+        f"- **${desglose.interes_estimado:,.2f}** — {t('intereses.desglose_interes')}",
+        f"- **${desglose.interes_mora:,.2f}** — {t('intereses.desglose_mora')}",
+    ]
+    if desglose.cargo_atraso > 0:
+        lineas.append(
+            f"- **${desglose.cargo_atraso:,.2f}** — {t('intereses.desglose_cargo_atraso')}"
+        )
+    st.markdown("\n\n".join(lineas))
     st.markdown(f"**{t('intereses.desglose_total', total=desglose.total)}**")
     st.caption(t("intereses.desglose_nota_minimo"))
     st.divider()

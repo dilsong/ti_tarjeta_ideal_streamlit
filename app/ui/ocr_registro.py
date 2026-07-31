@@ -12,10 +12,12 @@ from PIL import Image
 
 from app.core.ocr_captura import DatosCaptura, ocr_disponible, procesar_imagen_y_texto
 from app.i18n.translator import t
+from app.ui.form_intereses import limpiar_widgets_intereses
 
 
 _SESSION_OCR = "reg_ocr_datos"
 _SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
+SESSION_PREFILL = "reg_ocr_prefill"
 
 
 def _aplicar_a_formulario(datos: DatosCaptura) -> None:
@@ -34,14 +36,21 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
 
     if datos.nombre_tarjeta:
         st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
+
+    # Intereses, pago mínimo y cargo por atraso viajan como defaults del formulario:
+    # los widgets se reinician para que tomen el valor detectado.
+    prefill: dict[str, float] = {}
     if datos.pago_minimo is not None:
-        st.session_state["reg_pago_manual_on"] = True
-        st.session_state["reg_pago_manual_val"] = float(datos.pago_minimo)
+        prefill["pago_minimo"] = float(datos.pago_minimo)
     if datos.apr is not None:
-        st.session_state["reg_tasa_anual"] = float(datos.apr)
-        st.session_state["reg_usar_mora"] = datos.penalty_apr is not None
+        prefill["apr"] = float(datos.apr)
     if datos.penalty_apr is not None:
-        st.session_state["reg_tasa_mora"] = float(datos.penalty_apr)
+        prefill["penalty_apr"] = float(datos.penalty_apr)
+    if datos.late_fee is not None:
+        prefill["cargo_atraso"] = float(datos.late_fee)
+    if prefill:
+        st.session_state[SESSION_PREFILL] = prefill
+        limpiar_widgets_intereses("reg")
 
     texto = (datos.texto_crudo or "").lower()
     sugeridos = [
@@ -79,11 +88,11 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
     if datos.disponible is not None:
         filas.append(f"- **{t('pantalla_lista_tarjetas.disponible')}:** ${datos.disponible:,.2f}")
     if datos.pago_minimo is not None:
-        filas.append(f"- **Pago mínimo:** ${datos.pago_minimo:,.2f}")
+        filas.append(f"- **{t('intereses.pago_minimo')}:** ${datos.pago_minimo:,.2f}")
     if datos.late_fee is not None:
         filas.append(
-            f"- **Cargo por atraso (hasta):** ${datos.late_fee:,.2f} "
-            f"— _no es la tasa de interés anual_"
+            f"- **{t('intereses.cargo_atraso_corto')}:** ${datos.late_fee:,.2f} "
+            f"— _{t('intereses.cargo_atraso_nota_ocr')}_"
         )
     if datos.dia_corte is not None:
         filas.append(f"- **{t('pantalla_registrar_tarjeta.fecha_corte')}:** {datos.dia_corte}")

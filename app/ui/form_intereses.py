@@ -19,19 +19,50 @@ class DatosIntereses:
     pago_minimo_pct: float
     pago_minimo_piso: float
     pago_minimo_manual: float | None
+    cargo_atraso: float | None
+
+
+# Claves de widget que se reinician cuando el OCR trae valores nuevos.
+CLAVES_WIDGET = (
+    "_tasa_anual",
+    "_usar_mora",
+    "_tasa_mora",
+    "_pago_manual_on",
+    "_pago_manual_val",
+    "_pago_pct",
+    "_pago_piso",
+    "_cargo_atraso",
+)
+
+
+def limpiar_widgets_intereses(key_prefix: str) -> None:
+    """Borra el estado de los campos para que tomen los defaults nuevos."""
+    for sufijo in CLAVES_WIDGET:
+        st.session_state.pop(f"{key_prefix}{sufijo}", None)
+
+
+def _default(prefill: dict[str, float] | None, clave: str, actual):
+    """Prioriza lo detectado por OCR; si no hay, deja el valor actual."""
+    valor = (prefill or {}).get(clave)
+    return valor if valor is not None else actual
 
 
 def render_campos_intereses(
     key_prefix: str,
     tarjeta: Tarjeta | None = None,
+    prefill: dict[str, float] | None = None,
 ) -> DatosIntereses:
     """Formulario de tasas e interés diario calculado."""
-    tasa_default = tarjeta.tasa_interes_anual if tarjeta else TASA_INTERES_DEFAULT
-    mora_default = tarjeta.tasa_interes_mora if tarjeta else None
+    tasa_base = tarjeta.tasa_interes_anual if tarjeta else TASA_INTERES_DEFAULT
+    tasa_default = _default(prefill, "apr", tasa_base)
+    mora_default = _default(prefill, "penalty_apr", tarjeta.tasa_interes_mora if tarjeta else None)
     es_estimada = tarjeta.tasa_es_estimada if tarjeta else True
     pct_default = tarjeta.pago_minimo_pct if tarjeta else 5.0
     piso_default = tarjeta.pago_minimo_piso if tarjeta else 200.0
-    manual_default = tarjeta.pago_minimo_manual if tarjeta else None
+    manual_default = _default(
+        prefill, "pago_minimo", tarjeta.pago_minimo_manual if tarjeta else None
+    )
+    cargo_default = _default(prefill, "cargo_atraso", tarjeta.cargo_atraso if tarjeta else None)
 
     st.markdown(f"**{t('intereses.seccion_titulo')}**")
     if es_estimada:
@@ -65,6 +96,19 @@ def render_campos_intereses(
             key=f"{key_prefix}_tasa_mora",
         )
 
+    cargo = st.number_input(
+        t("intereses.cargo_atraso"),
+        min_value=0.0,
+        max_value=10000.0,
+        value=float(cargo_default or 0.0),
+        step=5.0,
+        format="%.2f",
+        key=f"{key_prefix}_cargo_atraso",
+        help=t("intereses.cargo_atraso_ayuda"),
+    )
+    st.caption(t("intereses.cargo_atraso_nota"))
+    cargo_atraso = cargo if cargo > 0 else None
+
     saldo_ref = tarjeta.adeudado_ciclo if tarjeta else 0.0
     diario = calcular_interes_diario(saldo_ref, tasa)
     st.caption(
@@ -76,8 +120,10 @@ def render_campos_intereses(
         )
     )
 
-    with st.expander(t("intereses.pago_minimo_titulo")):
+    with st.expander(t("intereses.pago_minimo_titulo"), expanded=manual_default is not None):
         st.caption(t("intereses.pago_minimo_subtitulo"))
+        if (prefill or {}).get("pago_minimo") is not None:
+            st.success(t("intereses.pago_minimo_detectado", monto=float(prefill["pago_minimo"])))
         usar_manual = st.checkbox(
             t("intereses.pago_minimo_manual_activar"),
             value=manual_default is not None,
@@ -124,4 +170,5 @@ def render_campos_intereses(
         pago_minimo_pct=pct_default,
         pago_minimo_piso=piso_default,
         pago_minimo_manual=manual,
+        cargo_atraso=cargo_atraso,
     )

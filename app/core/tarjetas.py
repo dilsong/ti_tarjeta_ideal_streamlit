@@ -49,6 +49,7 @@ class Tarjeta:
     pago_minimo_pct: float = 5.0
     pago_minimo_piso: float = 200.0
     pago_minimo_manual: float | None = None
+    cargo_atraso: float | None = None
     url_app_banco: str | None = None
     preferencia_banco: str = "app"
 
@@ -147,6 +148,8 @@ class Tarjeta:
             data = {**data, "pago_minimo_piso": 200.0}
         if "pago_minimo_manual" not in data:
             data = {**data, "pago_minimo_manual": None}
+        if "cargo_atraso" not in data:
+            data = {**data, "cargo_atraso": None}
         if "url_app_banco" not in data:
             data = {**data, "url_app_banco": None}
         if "preferencia_banco" not in data:

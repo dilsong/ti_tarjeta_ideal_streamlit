@@ -49,6 +49,7 @@ class DesgloseProximoCiclo:
     interes_mora: float
     total: float
     escenario: str
+    cargo_atraso: float = 0.0
 
 
 def tasa_vigente(tarjeta: Tarjeta, dias_hasta_pago: int = 0) -> float:
@@ -184,6 +185,7 @@ def generar_desglose_proximo_ciclo(
     sim = proy.escenario_minimo
 
     interes_mora = 0.0
+    cargo_atraso = 0.0
     if estado.dias_hasta_pago <= 0:
         tasa_mora = tarjeta.tasa_interes_mora or tasa_vigente(tarjeta, 0)
         interes_mora = calcular_interes_proximo_ciclo(
@@ -191,12 +193,16 @@ def generar_desglose_proximo_ciclo(
             tasa_mora,
             proy.dias_interes,
         )
+        # Cargo fijo del banco por pagar tarde: no depende de la tasa ni del saldo.
+        if tarjeta.cargo_atraso and proy.monto_pagar_ciclo > 0:
+            cargo_atraso = float(tarjeta.cargo_atraso)
 
     total = (
         sim.saldo_restante
         + estado.consumos_ciclo_actual
         + sim.interes_estimado
         + interes_mora
+        + cargo_atraso
     )
 
     return DesgloseProximoCiclo(
@@ -206,6 +212,7 @@ def generar_desglose_proximo_ciclo(
         interes_mora=interes_mora,
         total=total,
         escenario="minimo",
+        cargo_atraso=cargo_atraso,
     )
 
 

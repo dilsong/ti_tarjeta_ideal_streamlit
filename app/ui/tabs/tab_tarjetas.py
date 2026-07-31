@@ -61,6 +61,8 @@ def _guardar_umbral(tarjeta: Tarjeta, uso_pct: float | None, disp_min: float | N
 
         pago_minimo_manual=tarjeta.pago_minimo_manual,
 
+        cargo_atraso=tarjeta.cargo_atraso,
+
         url_app_banco=tarjeta.url_app_banco,
 
         preferencia_banco=tarjeta.preferencia_banco,

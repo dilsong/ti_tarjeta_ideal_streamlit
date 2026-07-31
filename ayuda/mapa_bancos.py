@@ -355,6 +355,7 @@ def seleccionar_tarjeta_para_actualizar(
 def actualizar_tarjeta(tarjeta: Tarjeta, resultados: ResultadosOCR) -> Tarjeta:
     nueva_tasa = resultados.apr if resultados.apr is not None else tarjeta.tasa_interes_anual
     nueva_mora = resultados.penalty_apr if resultados.penalty_apr is not None else tarjeta.tasa_interes_mora
+    nuevo_cargo = resultados.late_fee if resultados.late_fee is not None else tarjeta.cargo_atraso
     tasa_confirmada = resultados.apr is not None or resultados.penalty_apr is not None
 
     actualizada = Tarjeta(
@@ -378,6 +379,9 @@ def actualizar_tarjeta(tarjeta: Tarjeta, resultados: ResultadosOCR) -> Tarjeta:
         pago_minimo_pct=tarjeta.pago_minimo_pct,
         pago_minimo_piso=tarjeta.pago_minimo_piso,
         pago_minimo_manual=tarjeta.pago_minimo_manual,
+        cargo_atraso=nuevo_cargo,
+        url_app_banco=tarjeta.url_app_banco,
+        preferencia_banco=tarjeta.preferencia_banco,
     )
     guardar_tarjeta(actualizada)
     return actualizada

@@ -207,6 +207,7 @@ def render(on_back, on_saved, tarjeta_id: str) -> None:
                     pago_minimo_pct=datos_int.pago_minimo_pct,
                     pago_minimo_piso=datos_int.pago_minimo_piso,
                     pago_minimo_manual=datos_int.pago_minimo_manual,
+                    cargo_atraso=datos_int.cargo_atraso,
                     preferencia_banco=preferencia,
                     url_app_banco=manual,
                 )

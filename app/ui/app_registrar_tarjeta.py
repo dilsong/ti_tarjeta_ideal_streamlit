@@ -17,7 +17,7 @@ from app.core.tarjetas import EstiloTarjeta, Tarjeta, guardar_tarjeta
 from app.i18n.translator import t
 from app.ui.form_intereses import render_campos_intereses
 from app.ui.helpers import language_selector
-from app.ui.ocr_registro import render_ocr_para_registro
+from app.ui.ocr_registro import SESSION_PREFILL, render_ocr_para_registro
 
 NOMBRES_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
 PREF_VALS = ["app", "web"]
@@ -72,7 +72,7 @@ def render(on_back, on_saved) -> None:
     corte = entero_text_input(t("pantalla_registrar_tarjeta.fecha_corte"), "corte", placeholder="15")
     pago = entero_text_input(t("pantalla_registrar_tarjeta.fecha_pago"), "pago", placeholder="9")
 
-    datos_int = render_campos_intereses("reg")
+    datos_int = render_campos_intereses("reg", prefill=st.session_state.get(SESSION_PREFILL))
 
     c_pref, c_ayuda = st.columns([8, 1], vertical_alignment="center")
     with c_pref:
@@ -147,10 +147,13 @@ def render(on_back, on_saved) -> None:
                 tarjeta.pago_minimo_pct = datos_int.pago_minimo_pct
                 tarjeta.pago_minimo_piso = datos_int.pago_minimo_piso
                 tarjeta.pago_minimo_manual = datos_int.pago_minimo_manual
+                tarjeta.cargo_atraso = datos_int.cargo_atraso
                 tarjeta.preferencia_banco = preferencia
                 # Solo override manual; bancos del catálogo se resuelven por preferencia.
                 tarjeta.url_app_banco = (url_manual or "").strip() or None
                 guardar_tarjeta(tarjeta)
+                for clave in (SESSION_PREFILL, "reg_ocr_datos", "reg_ocr_texto_visto"):
+                    st.session_state.pop(clave, None)
                 st.success(t("pantalla_registrar_tarjeta.exito"))
                 on_saved()
 
