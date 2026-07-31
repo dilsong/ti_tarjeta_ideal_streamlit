@@ -11,6 +11,8 @@ env/
 # Streamlit / local
 .streamlit/secrets.toml
 app/data/devices/
+app/data/*.json
+app/data_backups/
 *.tmp
 
 # IDE / OS
