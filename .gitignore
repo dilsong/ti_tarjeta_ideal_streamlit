@@ -13,6 +13,8 @@ env/
 app/data/devices/
 app/data/*.json
 app/data_backups/
+config/notificaciones_usuario.json
+config/*.json
 *.tmp
 
 # IDE / OS
