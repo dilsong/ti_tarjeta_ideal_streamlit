@@ -32,13 +32,26 @@ def _monto_grande(label: str, valor: float) -> None:
     )
 
 
-def _monto_grande_con_desglose(label: str, valor: float, desglose, key: str) -> None:
+def _monto_grande_con_desglose(
+    label: str,
+    valor: float,
+    desglose,
+    key: str,
+    hint: str | None = None,
+) -> None:
     with fila_accion() as (c_main, c_btn):
         with c_main:
+            hint_html = (
+                f'<div style="color:#94A3B8;font-size:0.78rem;line-height:1.35;'
+                f'margin:0.2rem 0 0.35rem 0;">{hint}</div>'
+                if hint
+                else ""
+            )
             st.markdown(
                 f'<div style="background:#1E293B;border-radius:12px;padding:0.85rem 1rem;margin-bottom:0.5rem;">'
                 f'<div style="color:#CBD5E1;font-size:0.72rem;font-weight:600;text-transform:uppercase;">'
                 f"{label}</div>"
+                f"{hint_html}"
                 f'<div class="ti-money" style="color:#F8FAFC;font-size:1.75rem;font-weight:700;">'
                 f"${valor:,.2f}</div></div>",
                 unsafe_allow_html=True,
@@ -67,6 +80,7 @@ def render_panel_intereses(tarjeta: Tarjeta, *, key_prefix: str = "") -> None:
         proy.monto_acumulado_proximo_min,
         desglose_prox,
         f"{key_prefix}desglose_prox_{tarjeta.id}",
+        hint=t("intereses.monto_proximo_hint"),
     )
 
     if proy.monto_pagar_ciclo <= 0:

@@ -356,6 +356,7 @@
     "panel_titulo": "Simulación de intereses",
     "monto_pagar_ciclo": "Monto a pagar este ciclo",
     "monto_proximo_ciclo": "Acumulado próximo ciclo",
+    "monto_proximo_hint": "Si pagas solo el mínimo · ver montos del desglose en ?",
     "pago_minimo": "Pago mínimo",
     "saldo_arrastrado": "Saldo que se arrastra",
     "interes_estimado": "Interés estimado",

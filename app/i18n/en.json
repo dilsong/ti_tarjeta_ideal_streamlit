@@ -356,6 +356,7 @@
     "panel_titulo": "Interest simulation",
     "monto_pagar_ciclo": "Amount due this cycle",
     "monto_proximo_ciclo": "Next cycle total (minimum payment)",
+    "monto_proximo_hint": "If you pay only the minimum · see the breakdown in ?",
     "pago_minimo": "Minimum payment",
     "saldo_arrastrado": "Carried balance",
     "interes_estimado": "Estimated interest",
