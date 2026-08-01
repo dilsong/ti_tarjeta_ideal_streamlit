@@ -115,6 +115,74 @@ def _preparar_imagen_ocr(imagen: Image.Image) -> Image.Image:
     return gray
 
 
+def _texto_por_filas(imagen: Image.Image) -> str:
+    """
+    Reconstruye las filas reales usando las coordenadas de cada palabra.
+
+    En estados de cuenta a dos columnas Tesseract suele devolver la columna de
+    etiquetas y la de montos por separado ("Pago Mínimo a Pagar" queda a varias
+    líneas de "$25.00"). Agrupando por altura, etiqueta y monto vuelven a quedar
+    en la misma línea.
+    """
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except ImportError:
+        return ""
+
+    data = None
+    for lang in ("spa+eng", None):
+        try:
+            kwargs = {"config": "--psm 6", "output_type": Output.DICT}
+            if lang:
+                kwargs["lang"] = lang
+            data = pytesseract.image_to_data(imagen, **kwargs)
+            break
+        except Exception:
+            continue
+    if not data:
+        return ""
+
+    palabras: list[tuple[float, int, str]] = []
+    alturas: list[int] = []
+    for i in range(len(data.get("text", []))):
+        txt = (data["text"][i] or "").strip()
+        if not txt:
+            continue
+        try:
+            if float(data["conf"][i]) < 30:
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            top = int(data["top"][i])
+            alto = int(data["height"][i])
+            izq = int(data["left"][i])
+        except (TypeError, ValueError, KeyError):
+            continue
+        palabras.append((top + alto / 2.0, izq, txt))
+        alturas.append(alto)
+    if not palabras:
+        return ""
+
+    alturas.sort()
+    tolerancia = max(6.0, alturas[len(alturas) // 2] * 0.6)
+    palabras.sort(key=lambda p: (p[0], p[1]))
+
+    filas: list[list[tuple[float, int, str]]] = []
+    for palabra in palabras:
+        if filas and abs(palabra[0] - filas[-1][0][0]) <= tolerancia:
+            filas[-1].append(palabra)
+        else:
+            filas.append([palabra])
+
+    lineas = []
+    for fila in filas:
+        fila.sort(key=lambda p: p[1])
+        lineas.append(" ".join(p[2] for p in fila))
+    return "\n".join(lineas)
+
+
 def texto_desde_imagen(imagen: Image.Image) -> str:
     if not ocr_disponible():
         return ""
@@ -143,6 +211,16 @@ def texto_desde_imagen(imagen: Image.Image) -> str:
         if len((txt or "").strip()) > len(mejor.strip()):
             mejor = txt or ""
     return mejor
+
+
+def texto_por_filas_desde_imagen(imagen: Image.Image) -> str:
+    """Lectura alternativa con las columnas reagrupadas en su fila real."""
+    if not ocr_disponible():
+        return ""
+    try:
+        return _texto_por_filas(_preparar_imagen_ocr(imagen))
+    except Exception:
+        return ""
 
 
 _MESES_ES = (
@@ -237,6 +315,43 @@ def _dia_desde_fecha(texto_fecha: str) -> int | None:
 def _bloque_tras_etiqueta(texto: str, etiqueta_re: str, hasta: int = 120) -> str | None:
     m = re.search(etiqueta_re + rf"[:\s]*([\s\S]{{0,{hasta}}})", texto, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+_SOLO_MONTO = re.compile(r"^[=+\-\s]*\$?\s*[\d][\d.,]*$")
+
+
+def _monto_huerfano_tras_etiqueta(
+    texto: str,
+    etiqueta_re: str,
+    excluir: tuple[float | None, ...] = (),
+    maximo_lineas: int = 12,
+    tope: float | None = None,
+) -> float | None:
+    """
+    Para tablas que el OCR partió en dos bloques: primero todas las etiquetas y
+    después todos los montos. Toma el primer monto suelto plausible.
+    """
+    valores_excluidos = [v for v in excluir if v is not None]
+    for m in re.finditer(etiqueta_re, texto, re.IGNORECASE):
+        vistas = 0
+        for linea in texto[m.end() :].splitlines():
+            limpia = linea.strip()
+            if not limpia:
+                continue
+            vistas += 1
+            if vistas > maximo_lineas:
+                break
+            if not _SOLO_MONTO.match(limpia):
+                continue
+            val = _primer_monto(limpia)
+            if val is None or val <= 0:
+                continue
+            if tope is not None and val > tope:
+                continue
+            if any(abs(val - v) < 0.01 for v in valores_excluidos):
+                continue
+            return val
+    return None
 
 
 def _monto_en_lineas(
@@ -474,18 +589,34 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 break
     if r.pago_minimo is None:
         # "Mes(es)" descarta el aviso "Pago Mínimo — 8 Mes(es) — $176".
-        ruido = r"mes\(es\)|meses|si\s+usted|cada\s+per[ií]odo|each\s+period|you\s+will\s+pay|warning|aviso"
-        for etiq in (
+        ruido = (
+            r"mes\(es\)|meses|si\s+usted|cada\s+per[ií]odo|each\s+period|you\s+will\s+pay"
+            r"|warning|aviso|atraso|tardar|late\s+fee|no\s+recibimos|if\s+we\s+do\s+not"
+        )
+        etiquetas_min = (
             rf"pago\s+{_MINIMO}\s+a\s+pagar",
             r"minimum\s+payment\s+(?:due|amount)",
             rf"{_MINIMO}\s+a\s+pagar",
             rf"pago\s+{_MINIMO}",
             r"minimum\s+payment",
-        ):
+        )
+        for etiq in etiquetas_min:
             val = _monto_en_lineas(texto, etiq, lineas=3, excluir=ruido)
             if val is not None and 0 < val < 5000:
                 r.pago_minimo = val
                 break
+        if r.pago_minimo is None:
+            # Columnas partidas: el monto queda suelto varias líneas después.
+            for etiq in etiquetas_min:
+                val = _monto_huerfano_tras_etiqueta(
+                    texto,
+                    etiq,
+                    excluir=(r.saldo, r.limite, r.disponible),
+                    tope=r.saldo if r.saldo else None,
+                )
+                if val is not None and 0 < val < 5000:
+                    r.pago_minimo = val
+                    break
 
     for pat in (
         r"account\s+number\s*[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
@@ -544,12 +675,33 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     return r
 
 
+def _completar_vacios(destino: DatosCaptura, extra: DatosCaptura) -> DatosCaptura:
+    """Rellena solo los campos que la lectura principal no logró interpretar."""
+    for campo in fields(DatosCaptura):
+        if campo.name == "texto_crudo":
+            continue
+        if getattr(destino, campo.name) is None:
+            valor = getattr(extra, campo.name)
+            if valor is not None:
+                setattr(destino, campo.name, valor)
+    return destino
+
+
 def procesar_imagen_y_texto(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
     partes: list[str] = []
+    filas = ""
     if imagen is not None:
         ocr = texto_desde_imagen(imagen)
         if ocr.strip():
             partes.append(ocr)
-    if (texto_manual or "").strip():
-        partes.append(texto_manual.strip())
-    return extraer_datos_captura("\n".join(partes))
+        filas = texto_por_filas_desde_imagen(imagen)
+    manual = (texto_manual or "").strip()
+    if manual:
+        partes.append(manual)
+
+    resultado = extraer_datos_captura("\n".join(partes))
+    if filas.strip():
+        # Segunda pasada con las columnas reagrupadas: solo aporta lo que falte.
+        por_filas = extraer_datos_captura("\n".join([filas, manual]) if manual else filas)
+        resultado = _completar_vacios(resultado, por_filas)
+    return resultado

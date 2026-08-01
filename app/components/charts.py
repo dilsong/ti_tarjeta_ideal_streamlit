@@ -341,12 +341,13 @@ def _aplicar_stagger_hitos(filas: list[dict]) -> list[dict]:
     prev_ts = None
     for i in orden:
         ts = pd.Timestamp(filas[i]["fecha"])
-        if prev_ts is not None and abs((ts - prev_ts).days) < 6:
+        # En móvil, dos etiquetas separadas por una semana todavía se solapan.
+        if prev_ts is not None and abs((ts - prev_ts).days) < 11:
             slot = 1 - slot
         else:
             slot = 0
-        filas[i]["y_evento_txt"] = 0.36 + (0.14 * slot)
-        filas[i]["y_fecha_txt"] = -0.36 - (0.14 * slot)
+        filas[i]["y_evento_txt"] = 0.34 + (0.20 * slot)
+        filas[i]["y_fecha_txt"] = -0.34 - (0.20 * slot)
         prev_ts = ts
     return filas
 
@@ -480,7 +481,12 @@ def _render_timeline_fechas(
         df_compras = pd.DataFrame(marcadores_compras)
         compras_pts = (
             alt.Chart(df_compras)
-            .mark_point(filled=True, size=110, color=COLOR_COMPRA_MARCA, stroke="#0F172A", strokeWidth=1.5)
+            .mark_text(
+                text="🛒",
+                fontSize=16,
+                color=COLOR_COMPRA_MARCA,
+                baseline="middle",
+            )
             .encode(
                 x=x_enc,
                 y=y_enc,
@@ -504,8 +510,7 @@ def _render_timeline_fechas(
         st.markdown(
             '<div style="display:flex;align-items:center;gap:0.4rem;color:#94A3B8;'
             'font-size:0.82rem;margin-top:0.25rem;">'
-            '<span style="display:inline-block;width:0.55rem;height:0.55rem;'
-            'border-radius:50%;background:#EAB308;flex-shrink:0;"></span>'
+            '<span style="color:#EAB308;font-size:1rem;line-height:1;">🛒</span>'
             f'<span>{t("pantalla_lista_tarjetas.grafico_fechas_compras_leyenda")}</span></div>',
             unsafe_allow_html=True,
         )
