@@ -430,21 +430,41 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     elif re.search(r"\bdiscover\b", low):
         r.nombre_tarjeta = "Discover"
 
-    for etiq in (
-        r"minimum\s+payment\s+due",
-        r"pago\s+m[ií]nimo\s+a\s+pagar",
-        r"minimum\s+payment",
-        r"pago\s+m[ií]nimo",
+    # Pago mínimo: patrones directos primero (evita "Pago Mínimo 8 Mes(es) $176").
+    for pat in (
+        rf"pago\s+m[ií]nimo\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
+        rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
     ):
-        bloque = _bloque_tras_etiqueta(texto, etiq, 80)
-        if not bloque:
-            continue
-        if re.search(r"si\s+usted|each\s+period|cada\s+per[ií]odo|ejemplo|you\s+will\s+pay", bloque, re.I):
-            bloque = "\n".join(bloque.splitlines()[:3])
-        val = _primer_monto(bloque)
-        if val is not None and 0 < val < 5000:
-            r.pago_minimo = val
-            break
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            try:
+                val = _float_es(m)
+            except ValueError:
+                continue
+            if 0 < val < 5000:
+                r.pago_minimo = val
+                break
+    if r.pago_minimo is None:
+        for etiq in (
+            r"pago\s+m[ií]nimo\s+a\s+pagar",
+            r"minimum\s+payment\s+due",
+            r"minimum\s+payment",
+            r"pago\s+m[ií]nimo(?!\s+\d+\s+mes)",
+        ):
+            bloque = _bloque_tras_etiqueta(texto, etiq, 60)
+            if not bloque:
+                continue
+            if re.search(
+                r"si\s+usted|each\s+period|cada\s+per[ií]odo|ejemplo|you\s+will\s+pay|mes\(es\)",
+                bloque,
+                re.I,
+            ):
+                bloque = "\n".join(bloque.splitlines()[:2])
+            val = _primer_monto(bloque)
+            if val is not None and 0 < val < 5000:
+                r.pago_minimo = val
+                break
 
     for pat in (
         r"account\s+number\s*[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
@@ -477,12 +497,14 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         if m:
             r.penalty_apr = float(m.group(1).replace(",", "."))
 
-    # Cargo por atraso ≠ tasa anual
+    # Cargo por atraso ≠ tasa anual ni tasa moratoria
     for pat in (
         r"late\s+fee\s+up\s+to\s+\$?\s*([\d]+(?:[.,]\d+)?)",
         r"Late\s+(?:Payment\s+)?Fee[:\s]*(?:up\s+to\s+)?\$?\s*([\d]+(?:[.,]\d+)?)",
-        r"cargo\s+por\s+atraso(?:\s+en\s+el\s+pago)?\s+de\s+hasta\s+\$?\s*([\d]+(?:[.,]\d+)?)",
-        r"Comisi[oó]n\s+por\s+pago\s+tard[ií]o[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"cargo\s+por\s+atraso(?:\s+en\s+el\s+pago)?(?:[^\d$]{0,40})(?:de\s+)?hasta\s+\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"cargo\s+por\s+atraso(?:\s+en\s+el\s+pago)?\s*[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Comisi[oó]n\s+por\s+pago\s+tard[ií]o[:\s]*(?:de\s+hasta\s+)?\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"hasta\s+\$?\s*([\d]+(?:[.,]\d+)?)\s*(?:por\s+)?(?:atraso|pago\s+tard[ií]o|late\s+fee)",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:

@@ -12,7 +12,7 @@ from PIL import Image
 
 from app.core.ocr_captura import DatosCaptura, ocr_disponible, procesar_imagen_y_texto
 from app.i18n.translator import t
-from app.ui.form_intereses import limpiar_widgets_intereses
+from app.ui.form_intereses import aplicar_prefill_a_widgets
 
 
 _SESSION_OCR = "reg_ocr_datos"
@@ -37,8 +37,8 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
     if datos.nombre_tarjeta:
         st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
 
-    # Intereses, pago mínimo y cargo por atraso viajan como defaults del formulario:
-    # los widgets se reinician para que tomen el valor detectado.
+    # Intereses / pago mínimo / cargo: escribir directo en las claves de los widgets
+    # (Streamlit ignora value= si la key ya existe; por eso hay que setear session_state).
     prefill: dict[str, float] = {}
     if datos.pago_minimo is not None:
         prefill["pago_minimo"] = float(datos.pago_minimo)
@@ -48,9 +48,8 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
         prefill["penalty_apr"] = float(datos.penalty_apr)
     if datos.late_fee is not None:
         prefill["cargo_atraso"] = float(datos.late_fee)
-    if prefill:
-        st.session_state[SESSION_PREFILL] = prefill
-        limpiar_widgets_intereses("reg")
+    st.session_state[SESSION_PREFILL] = prefill
+    aplicar_prefill_a_widgets("reg", prefill)
 
     texto = (datos.texto_crudo or "").lower()
     sugeridos = [
