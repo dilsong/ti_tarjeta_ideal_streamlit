@@ -105,7 +105,10 @@
     "ocr_fallo": "No se pudo leer la imagen. Pega el texto manualmente y vuelve a analizar.",
     "ocr_sin_campos": "Se leyó texto, pero no se reconocieron campos. Ajusta el texto o completa a mano.",
     "ocr_texto_sin_campos_hint": "Abre «Ver texto leído», copia lo importante al cuadro de texto y vuelve a analizar.",
-    "ocr_imagen_invalida": "No se pudo mostrar la imagen."
+    "ocr_imagen_invalida": "No se pudo mostrar la imagen.",
+    "ocr_no_detectado": "No se detectó: {campos}. Complétalo a mano en el formulario.",
+    "limpiar_formulario": "Limpiar",
+    "limpiar_formulario_ayuda": "Borra el análisis y todos los campos para registrar otra tarjeta desde cero."
   },
   "pantalla_lista_tarjetas": {
     "titulo": "Mis tarjetas",

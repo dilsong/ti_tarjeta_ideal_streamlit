@@ -12,12 +12,41 @@ from PIL import Image
 
 from app.core.ocr_captura import DatosCaptura, ocr_disponible, procesar_imagen_y_texto
 from app.i18n.translator import t
-from app.ui.form_intereses import aplicar_prefill_a_widgets
+from app.ui.form_intereses import aplicar_prefill_a_widgets, limpiar_widgets_intereses
 
 
 _SESSION_OCR = "reg_ocr_datos"
 _SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
 SESSION_PREFILL = "reg_ocr_prefill"
+
+# Campos del formulario de registro que deben quedar vacíos al empezar de cero.
+_CLAVES_FORM = (
+    "limite",
+    "adeudado",
+    "digitos",
+    "corte",
+    "pago",
+    "url_app_banco",
+    "swa_sel_banco",
+    "swa_custom_banco",
+    "swa_sel_nombre_tarjeta",
+    "swa_custom_nombre_tarjeta",
+)
+_CLAVES_OCR = (_SESSION_OCR, _SESSION_OCR_TEXTO, SESSION_PREFILL, "reg_ocr_manual")
+
+
+def _borrar(*claves: str) -> None:
+    for clave in claves:
+        try:
+            st.session_state.pop(clave, None)
+        except Exception:
+            pass
+
+
+def limpiar_formulario_registro() -> None:
+    """Deja el formulario y el análisis en blanco (nueva tarjeta desde cero)."""
+    _borrar(*_CLAVES_FORM, *_CLAVES_OCR)
+    limpiar_widgets_intereses("reg")
 
 
 def _aplicar_a_formulario(datos: DatosCaptura) -> None:
@@ -108,6 +137,25 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
         return
     st.markdown("\n".join(filas))
 
+    faltantes = [
+        etiqueta
+        for valor, etiqueta in (
+            (datos.limite, t("pantalla_registrar_tarjeta.limite")),
+            (datos.saldo, t("pantalla_registrar_tarjeta.adeudado")),
+            (datos.dia_corte, t("pantalla_registrar_tarjeta.fecha_corte")),
+            (datos.dia_pago, t("pantalla_registrar_tarjeta.fecha_pago")),
+            (datos.ultimos_digitos, t("pantalla_registrar_tarjeta.ultimos_digitos")),
+            (datos.pago_minimo, t("intereses.pago_minimo")),
+            (datos.late_fee, t("intereses.cargo_atraso_corto")),
+            (datos.apr, "APR"),
+        )
+        if valor is None
+    ]
+    if faltantes:
+        st.caption(
+            t("pantalla_registrar_tarjeta.ocr_no_detectado", campos=", ".join(faltantes))
+        )
+
 
 def render_ocr_para_registro() -> None:
     with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=True):
@@ -142,13 +190,26 @@ def render_ocr_para_registro() -> None:
             )
 
         puede = bool(captura or (texto_manual or "").strip())
-        if st.button(
+        c_analizar, c_limpiar = st.columns([3, 1])
+        analizar = c_analizar.button(
             t("pantalla_registrar_tarjeta.ocr_analizar"),
             type="primary",
             use_container_width=True,
             disabled=not puede,
             key="reg_ocr_analizar",
+        )
+        if c_limpiar.button(
+            t("pantalla_registrar_tarjeta.limpiar_formulario"),
+            use_container_width=True,
+            key="reg_ocr_limpiar",
+            help=t("pantalla_registrar_tarjeta.limpiar_formulario_ayuda"),
         ):
+            limpiar_formulario_registro()
+            st.rerun()
+
+        if analizar:
+            # Análisis nuevo: descartar el resultado anterior para no mezclar datos.
+            _borrar(_SESSION_OCR, _SESSION_OCR_TEXTO, SESSION_PREFILL)
             imagen = None
             if captura:
                 try:

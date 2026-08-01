@@ -105,7 +105,10 @@
     "ocr_fallo": "Could not read the image. Paste the text manually and analyze again.",
     "ocr_sin_campos": "Text was read, but no fields matched. Adjust the text or fill manually.",
     "ocr_texto_sin_campos_hint": "Open «View extracted text», copy the key lines into the text box and analyze again.",
-    "ocr_imagen_invalida": "Could not display the image."
+    "ocr_imagen_invalida": "Could not display the image.",
+    "ocr_no_detectado": "Not detected: {campos}. Fill it in manually in the form.",
+    "limpiar_formulario": "Clear",
+    "limpiar_formulario_ayuda": "Clears the analysis and every field so you can register another card from scratch."
   },
   "pantalla_lista_tarjetas": {
     "titulo": "My cards",

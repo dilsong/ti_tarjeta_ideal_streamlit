@@ -151,6 +151,8 @@ _MESES_ES = (
 )
 _MESES_EN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 _MONTO = r"([\d]{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?|\d+(?:[.,]\d{2})?)"
+# "mínimo" tolerante a acentos perdidos y confusiones típicas del OCR (í→i/1/l/f).
+_MINIMO = r"m[íi1lf]n[íi1lf]mo"
 
 
 def _float_es(m: re.Match[str], group: int = 1) -> float:
@@ -235,6 +237,30 @@ def _dia_desde_fecha(texto_fecha: str) -> int | None:
 def _bloque_tras_etiqueta(texto: str, etiqueta_re: str, hasta: int = 120) -> str | None:
     m = re.search(etiqueta_re + rf"[:\s]*([\s\S]{{0,{hasta}}})", texto, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+def _monto_en_lineas(
+    texto: str,
+    etiqueta_re: str,
+    lineas: int = 3,
+    excluir: str | None = None,
+) -> float | None:
+    """
+    Monto en la misma línea de la etiqueta o, si el OCR partió la tabla en
+    columnas, en las líneas siguientes.
+    """
+    for m in re.finditer(etiqueta_re, texto, re.IGNORECASE):
+        resto = texto[m.end() :]
+        for linea in resto.splitlines()[: lineas + 1]:
+            if excluir:
+                # Corta la línea antes del texto ruidoso (avisos, "8 Mes(es)", etc.)
+                corte = re.search(excluir, linea, re.IGNORECASE)
+                if corte:
+                    linea = linea[: corte.start()]
+            val = _primer_monto(linea)
+            if val is not None:
+                return val
+    return None
 
 
 def _limpiar_texto_ocr(texto: str) -> str:
@@ -430,10 +456,11 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     elif re.search(r"\bdiscover\b", low):
         r.nombre_tarjeta = "Discover"
 
-    # Pago mínimo: patrones directos primero (evita "Pago Mínimo 8 Mes(es) $176").
+    # Pago mínimo: directo en la misma línea (más preciso) y luego por columnas.
     for pat in (
-        rf"pago\s+m[ií]nimo\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+{_MINIMO}\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
         rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+{_MINIMO}\s+requerido\s*[:\s]*\$?\s*{_MONTO}",
         rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
@@ -446,22 +473,16 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.pago_minimo = val
                 break
     if r.pago_minimo is None:
+        # "Mes(es)" descarta el aviso "Pago Mínimo — 8 Mes(es) — $176".
+        ruido = r"mes\(es\)|meses|si\s+usted|cada\s+per[ií]odo|each\s+period|you\s+will\s+pay|warning|aviso"
         for etiq in (
-            r"pago\s+m[ií]nimo\s+a\s+pagar",
-            r"minimum\s+payment\s+due",
+            rf"pago\s+{_MINIMO}\s+a\s+pagar",
+            r"minimum\s+payment\s+(?:due|amount)",
+            rf"{_MINIMO}\s+a\s+pagar",
+            rf"pago\s+{_MINIMO}",
             r"minimum\s+payment",
-            r"pago\s+m[ií]nimo(?!\s+\d+\s+mes)",
         ):
-            bloque = _bloque_tras_etiqueta(texto, etiq, 60)
-            if not bloque:
-                continue
-            if re.search(
-                r"si\s+usted|each\s+period|cada\s+per[ií]odo|ejemplo|you\s+will\s+pay|mes\(es\)",
-                bloque,
-                re.I,
-            ):
-                bloque = "\n".join(bloque.splitlines()[:2])
-            val = _primer_monto(bloque)
+            val = _monto_en_lineas(texto, etiq, lineas=3, excluir=ruido)
             if val is not None and 0 < val < 5000:
                 r.pago_minimo = val
                 break

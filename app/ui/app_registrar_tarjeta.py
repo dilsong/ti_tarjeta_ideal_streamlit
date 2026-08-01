@@ -17,7 +17,11 @@ from app.core.tarjetas import EstiloTarjeta, Tarjeta, guardar_tarjeta
 from app.i18n.translator import t
 from app.ui.form_intereses import render_campos_intereses
 from app.ui.helpers import language_selector
-from app.ui.ocr_registro import SESSION_PREFILL, render_ocr_para_registro
+from app.ui.ocr_registro import (
+    SESSION_PREFILL,
+    limpiar_formulario_registro,
+    render_ocr_para_registro,
+)
 
 NOMBRES_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
 PREF_VALS = ["app", "web"]
@@ -152,8 +156,7 @@ def render(on_back, on_saved) -> None:
                 # Solo override manual; bancos del catálogo se resuelven por preferencia.
                 tarjeta.url_app_banco = (url_manual or "").strip() or None
                 guardar_tarjeta(tarjeta)
-                for clave in (SESSION_PREFILL, "reg_ocr_datos", "reg_ocr_texto_visto"):
-                    st.session_state.pop(clave, None)
+                limpiar_formulario_registro()
                 st.success(t("pantalla_registrar_tarjeta.exito"))
                 on_saved()
 
