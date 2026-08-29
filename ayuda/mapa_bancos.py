@@ -380,6 +380,8 @@ def actualizar_tarjeta(tarjeta: Tarjeta, resultados: ResultadosOCR) -> Tarjeta:
         pago_minimo_piso=tarjeta.pago_minimo_piso,
         pago_minimo_manual=tarjeta.pago_minimo_manual,
         cargo_atraso=nuevo_cargo,
+        monto_vencido_atrasado=tarjeta.monto_vencido_atrasado,
+        pago_sin_intereses=tarjeta.pago_sin_intereses,
         url_app_banco=tarjeta.url_app_banco,
         preferencia_banco=tarjeta.preferencia_banco,
     )

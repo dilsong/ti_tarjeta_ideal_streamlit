@@ -16,6 +16,7 @@ from app.ui.form_intereses import aplicar_prefill_a_widgets, limpiar_widgets_int
 
 
 _SESSION_OCR = "reg_ocr_datos"
+SESSION_OCR_DATOS = _SESSION_OCR
 _SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
 SESSION_PREFILL = "reg_ocr_prefill"
 
@@ -41,6 +42,14 @@ def _borrar(*claves: str) -> None:
             st.session_state.pop(clave, None)
         except Exception:
             pass
+
+
+def datos_ocr_pendientes() -> DatosCaptura | None:
+    """Datos OCR del último análisis (para persistir al guardar la tarjeta)."""
+    raw = st.session_state.get(_SESSION_OCR)
+    if not raw:
+        return None
+    return DatosCaptura.from_dict(raw)
 
 
 def limpiar_formulario_registro() -> None:
@@ -117,6 +126,20 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
         filas.append(f"- **{t('pantalla_lista_tarjetas.disponible')}:** ${datos.disponible:,.2f}")
     if datos.pago_minimo is not None:
         filas.append(f"- **{t('intereses.pago_minimo')}:** ${datos.pago_minimo:,.2f}")
+    if datos.pago_sin_intereses is not None:
+        filas.append(
+            f"- **{t('salud_tarjeta.pago_sin_intereses')}:** ${datos.pago_sin_intereses:,.2f}"
+        )
+    if datos.monto_vencido_atrasado is not None and datos.monto_vencido_atrasado > 0:
+        filas.append(
+            f"- **🚨 {t('salud_tarjeta.monto_vencido')}:** ${datos.monto_vencido_atrasado:,.2f}"
+        )
+        st.error(
+            t(
+                "salud_tarjeta.alerta_ocr_detectado",
+                monto=float(datos.monto_vencido_atrasado),
+            )
+        )
     if datos.late_fee is not None:
         filas.append(
             f"- **{t('intereses.cargo_atraso_corto')}:** ${datos.late_fee:,.2f} "
@@ -146,6 +169,7 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
             (datos.dia_pago, t("pantalla_registrar_tarjeta.fecha_pago")),
             (datos.ultimos_digitos, t("pantalla_registrar_tarjeta.ultimos_digitos")),
             (datos.pago_minimo, t("intereses.pago_minimo")),
+            (datos.pago_sin_intereses, t("salud_tarjeta.pago_sin_intereses")),
             (datos.late_fee, t("intereses.cargo_atraso_corto")),
             (datos.apr, "APR"),
         )

@@ -50,6 +50,8 @@ class Tarjeta:
     pago_minimo_piso: float = 200.0
     pago_minimo_manual: float | None = None
     cargo_atraso: float | None = None
+    monto_vencido_atrasado: float = 0.0
+    pago_sin_intereses: float | None = None
     url_app_banco: str | None = None
     preferencia_banco: str = "app"
 
@@ -114,6 +116,8 @@ class Tarjeta:
 
     def excluida_de_recomendacion(self, monto: float = 0.0) -> bool:
         """True si la tarjeta no debe entrar en la simulación de compra."""
+        if float(self.monto_vencido_atrasado or 0) > 0:
+            return True
         if self.umbral_uso_pct is not None and self.uso_porcentaje >= self.umbral_uso_pct:
             return True
         if self.umbral_disponible_min is not None and self.disponible < self.umbral_disponible_min:
@@ -150,6 +154,10 @@ class Tarjeta:
             data = {**data, "pago_minimo_manual": None}
         if "cargo_atraso" not in data:
             data = {**data, "cargo_atraso": None}
+        if "monto_vencido_atrasado" not in data:
+            data = {**data, "monto_vencido_atrasado": 0.0}
+        if "pago_sin_intereses" not in data:
+            data = {**data, "pago_sin_intereses": None}
         if "url_app_banco" not in data:
             data = {**data, "url_app_banco": None}
         if "preferencia_banco" not in data:

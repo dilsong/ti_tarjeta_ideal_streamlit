@@ -308,6 +308,8 @@
     "conclusion_comoda": "This is the most comfortable option for your wallet.",
     "conclusion_cuidado": "Use it carefully and plan your payment.",
     "conclusion_evitar": "Consider postponing the purchase or using another card.",
+    "bloqueo_atraso": "You have cards with past-due balances. Pay those off first — new purchases should wait until you're caught up.",
+    "bloqueo_atraso_tarjeta": "This card has a past-due balance. Don't use {nombre} for purchases until you're caught up.",
     "compra_proximo_ciclo": "This purchase goes on the next cycle and won't increase what you owe this month.",
     "sin_intereses_ciclo_actual": "Your current cycle payment is not affected by this purchase.",
     "dias_pago_siguiente_ciclo": "If you buy after cut-off, you would pay in {dias} days (next cycle)."
@@ -386,6 +388,13 @@
     "desglose_nota_minimo": "If you pay only the minimum, these amounts roll into the next cycle.",
     "ver_desglose": "View detailed breakdown",
     "resumen_estado_simple": "Next cycle total (minimum payment): ~${monto:,.2f}"
+  },
+  "salud_tarjeta": {
+    "alerta_atraso": "🚨 {tarjeta} has ${monto:,.2f} past due. Pay at least ${pago:,.2f} to avoid more charges.",
+    "alerta_atraso_con_cargo": "🚨 {tarjeta} has ${monto:,.2f} past due. Pay at least ${pago:,.2f} to avoid more charges (includes ${cargo:,.2f} late fee).",
+    "pago_sin_intereses": "Payment to avoid interest",
+    "monto_vencido": "Past due amount",
+    "alerta_ocr_detectado": "We detected ${monto:,.2f} past due. After saving, this card will be blocked from purchase suggestions until you're caught up."
   },
   "banner_sugerencia": {
     "ciclo_pendiente_total": "You owe {deuda} from the previous cycle with no new purchases. Your bank may already be charging interest on that balance. {dias} days left — paying the full {monto} is best.",

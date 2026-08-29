@@ -19,6 +19,7 @@ from app.ui.form_intereses import render_campos_intereses
 from app.ui.helpers import language_selector
 from app.ui.ocr_registro import (
     SESSION_PREFILL,
+    datos_ocr_pendientes,
     limpiar_formulario_registro,
     render_ocr_para_registro,
 )
@@ -153,6 +154,17 @@ def render(on_back, on_saved) -> None:
                 tarjeta.pago_minimo_manual = datos_int.pago_minimo_manual
                 tarjeta.cargo_atraso = datos_int.cargo_atraso
                 tarjeta.preferencia_banco = preferencia
+                ocr = datos_ocr_pendientes()
+                if ocr and ocr.monto_vencido_atrasado is not None:
+                    tarjeta.monto_vencido_atrasado = float(ocr.monto_vencido_atrasado)
+                else:
+                    tarjeta.monto_vencido_atrasado = 0.0
+                if ocr and ocr.pago_sin_intereses is not None:
+                    tarjeta.pago_sin_intereses = float(ocr.pago_sin_intereses)
+                elif ocr and ocr.saldo is not None:
+                    tarjeta.pago_sin_intereses = float(ocr.saldo)
+                else:
+                    tarjeta.pago_sin_intereses = float(adeudado)
                 # Solo override manual; bancos del catálogo se resuelven por preferencia.
                 tarjeta.url_app_banco = (url_manual or "").strip() or None
                 guardar_tarjeta(tarjeta)

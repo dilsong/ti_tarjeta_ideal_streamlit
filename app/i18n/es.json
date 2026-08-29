@@ -307,6 +307,8 @@
     "conclusion_comoda": "Esta es la opción más cómoda para tu bolsillo.",
     "conclusion_cuidado": "Úsala con cuidado y planifica tu pago.",
     "conclusion_evitar": "Considera posponer la compra o usar otra tarjeta.",
+    "bloqueo_atraso": "Tienes tarjetas con pago atrasado. Primero pon al día esas deudas — no conviene hacer compras nuevas hasta entonces.",
+    "bloqueo_atraso_tarjeta": "Esta tarjeta tiene pago atrasado. No uses {nombre} para compras hasta ponerte al día.",
     "compra_proximo_ciclo": "Esta compra entra al próximo ciclo y no aumenta lo que debes pagar este mes.",
     "sin_intereses_ciclo_actual": "Tu pago del ciclo actual no se ve afectado por esta compra.",
     "dias_pago_siguiente_ciclo": "Si compras después del corte, pagarías en {dias} días (ciclo siguiente)."
@@ -385,6 +387,13 @@
     "desglose_nota_minimo": "Si pagas solo el mínimo, estos montos se suman al próximo ciclo.",
     "ver_desglose": "Ver desglose detallado",
     "resumen_estado_simple": "Acumulado próximo ciclo (pago mínimo): ~${monto:,.2f}"
+  },
+  "salud_tarjeta": {
+    "alerta_atraso": "🚨 {tarjeta} tiene ${monto:,.2f} vencido. Paga al menos ${pago:,.2f} para evitar más cargos.",
+    "alerta_atraso_con_cargo": "🚨 {tarjeta} tiene ${monto:,.2f} vencido. Paga al menos ${pago:,.2f} para evitar más cargos (incluye cargo por atraso de ${cargo:,.2f}).",
+    "pago_sin_intereses": "Pago para no generar intereses",
+    "monto_vencido": "Monto vencido (Past Due)",
+    "alerta_ocr_detectado": "Detectamos ${monto:,.2f} vencido (Past Due). Al guardar, esta tarjeta quedará bloqueada para compras hasta ponerte al día."
   },
   "banner_sugerencia": {
     "ciclo_pendiente_total": "Debes {deuda} del ciclo anterior y no llevas compras nuevas. Sobre ese saldo el banco ya puede estar generando intereses. Te quedan {dias} días — lo ideal es pagar el total ({monto}).",

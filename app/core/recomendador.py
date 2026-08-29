@@ -9,6 +9,7 @@ from datetime import date
 
 from app.core.ciclo import calcular_disponibilidad
 from app.core.fechas import hoy
+from app.core.salud_tarjeta import tiene_atraso
 from app.core.tarjetas import Tarjeta
 from app.core.validacion_ciclo import (
     compra_cae_en_proximo_ciclo,
@@ -217,6 +218,20 @@ def evaluar_tarjeta_abanico(
 ) -> EvaluacionEleccion:
     """Evalúa pros y contras de usar la tarjeta que el usuario tiene al frente."""
     ref = referencia or hoy()
+
+    if tiene_atraso(tarjeta):
+        from app.core.salud_tarjeta import mensaje_alerta_atraso
+
+        alerta = mensaje_alerta_atraso(tarjeta)
+        return EvaluacionEleccion(
+            tarjeta=tarjeta,
+            pros=[],
+            contras=[alerta],
+            resumen=t("pantalla_recomendacion.bloqueo_atraso_tarjeta", nombre=tarjeta.nombre),
+            puede_comprar=False,
+            score=-1.0,
+        )
+
     pros: list[str] = []
     contras: list[str] = []
 
@@ -320,6 +335,11 @@ def recomendar_tarjeta(
             candidatas.append((tarjeta, score))
 
     if not candidatas:
+        if any(tiene_atraso(t) for t in tarjetas):
+            return Recomendacion(
+                tarjeta=None,
+                mensaje=t("pantalla_recomendacion.bloqueo_atraso"),
+            )
         return Recomendacion(tarjeta=None, mensaje=t("pantalla_recomendacion.sin_opcion"))
 
     candidatas.sort(key=lambda x: x[1], reverse=True)

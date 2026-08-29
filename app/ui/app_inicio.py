@@ -11,6 +11,7 @@ import streamlit as st
 from app.core.asesor_diario import generar_brief_tarjeta
 from app.components.dialogo_pago_banco import confirmar_pago_en_banco
 from app.core.pagos import calcular_sugerencia_abono
+from app.core.salud_tarjeta import listar_tarjetas_con_atraso, mensaje_alerta_atraso, prioridad_pago
 from app.core.tarjetas import listar_tarjetas
 from app.i18n.translator import t
 from app.ui.helpers import render_abanico_global, render_page_header
@@ -82,6 +83,15 @@ def _mensaje_sugerencia(sug) -> tuple[str, str]:
             )
         secundaria = t("banner_sugerencia.recomienda_historial", monto=monto) if sug.usa_historial else ""
     return principal, secundaria
+
+
+def _render_banner_emergencia_atraso(tarjetas) -> None:
+    """🚨 Arriba de todo si alguna tarjeta tiene deuda vencida (Past Due)."""
+    con_atraso = listar_tarjetas_con_atraso(tarjetas)
+    if not con_atraso:
+        return
+    for tarjeta in prioridad_pago(con_atraso):
+        _render_banner_alerta(mensaje_alerta_atraso(tarjeta), "urgente")
 
 
 def _render_brief_asesor(tarjeta) -> None:
@@ -169,6 +179,8 @@ def _render_empty(on_navigate) -> None:
 
 def _render_with_cards(on_navigate, on_edit) -> None:
     tarjetas = listar_tarjetas()
+
+    _render_banner_emergencia_atraso(tarjetas)
 
     render_page_header(
         t("pantalla_inicio.titulo"),
