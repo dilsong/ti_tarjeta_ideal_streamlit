@@ -330,6 +330,41 @@ MOBILE_CSS = """
         border: 1px solid #EF4444;
         color: #FECACA;
     }
+    .ti-deuda-clara {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .ti-deuda-bloque {
+        padding-bottom: 0.65rem;
+    }
+    .ti-deuda-bloque--urgente {
+        border-bottom: 1px solid rgba(254, 202, 202, 0.25);
+        padding-bottom: 0.85rem;
+    }
+    .ti-deuda-bloque:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+    .ti-deuda-etiq {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        opacity: 0.9;
+    }
+    .ti-deuda-monto {
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-top: 0.15rem;
+    }
+    .ti-deuda-sub {
+        font-size: 0.88rem;
+        line-height: 1.45;
+        margin-top: 0.35rem;
+        opacity: 0.95;
+    }
 
     /* Asesor diario — voz humana */
     .ti-asesor-hoy {
@@ -342,6 +377,11 @@ MOBILE_CSS = """
     .ti-asesor-hoy .ti-asesor-saludo {
         color: #93C5FD;
         font-weight: 700;
+        margin-bottom: 0.55rem;
+    }
+    .ti-asesor-hoy .ti-deuda-bloque {
+        margin-top: 0.35rem;
+    }
         font-size: 0.95rem;
         margin-bottom: 0.35rem;
     }

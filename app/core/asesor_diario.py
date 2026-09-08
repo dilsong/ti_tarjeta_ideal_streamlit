@@ -8,6 +8,8 @@ from datetime import date
 from app.core.consumos import listar_consumos_por_tarjeta
 from app.core.fechas import formatear_fecha, hoy
 from app.core.pagos import listar_pagos_por_tarjeta
+from app.core.recomendador import etiqueta_recomendada
+from app.core.salud_tarjeta import fmt_dinero, tiene_atraso, mensaje_past_due_hoy
 from app.core.tarjetas import Tarjeta
 from app.core.validacion_ciclo import estado_riesgo_pago, validar_ciclo
 from app.i18n.translator import get_language, t
@@ -20,6 +22,7 @@ class BriefAsesor:
     mensaje: str
     tono: str  # tranquilo | atencion | urgente
     datos_desactualizados: bool = False
+    dias_sin_actividad: int = 0
 
 
 def _ultima_actividad(tarjeta_id: str) -> date | None:
@@ -50,12 +53,15 @@ def generar_brief_tarjeta(tarjeta: Tarjeta, referencia: date | None = None) -> B
     dias_sin_mov = (ref - ultima).days if ultima else 999
     datos_viejos = dias_sin_mov > 14
 
-    saludo = t("asesor_diario.saludo", nombre=tarjeta.nombre)
+    saludo = t("asesor_diario.saludo", nombre=etiqueta_recomendada(tarjeta))
 
-    if deuda > 0 and riesgo.value == "negativo":
+    if tiene_atraso(tarjeta):
+        mensaje = mensaje_past_due_hoy(tarjeta, ref)
+        tono = "urgente"
+    elif deuda > 0 and riesgo.value == "negativo":
         mensaje = t(
             "asesor_diario.pago_urgente",
-            monto=f"${deuda:,.2f}",
+            monto=fmt_dinero(deuda),
             dias=estado.dias_hasta_pago,
             pago=pago_txt,
         )
@@ -63,7 +69,7 @@ def generar_brief_tarjeta(tarjeta: Tarjeta, referencia: date | None = None) -> B
     elif deuda > 0:
         mensaje = t(
             "asesor_diario.pago_pendiente",
-            monto=f"${deuda:,.2f}",
+            monto=fmt_dinero(deuda),
             dias=estado.dias_hasta_pago,
             pago=pago_txt,
         )
@@ -76,24 +82,22 @@ def generar_brief_tarjeta(tarjeta: Tarjeta, referencia: date | None = None) -> B
         )
         mensaje = t(
             "asesor_diario.ciclo_abierto",
-            monto=f"${consumos:,.2f}",
+            monto=fmt_dinero(consumos),
             corte=corte_txt,
-            disp=f"${disp:,.2f}",
+            disp=fmt_dinero(disp),
         )
         tono = "info"
     else:
         mensaje = t(
             "asesor_diario.tranquilo",
-            disp=f"${disp:,.2f}",
+            disp=fmt_dinero(disp),
         )
         tono = "tranquilo"
 
     notif = evaluar_notificaciones_tarjeta(tarjeta, ref)
     if notif and deuda <= 0 and consumos <= 0:
-        cuerpo = notif.mensaje.split("\n", 1)[-1].strip()
-        if "TI Asesor" in cuerpo or cuerpo.startswith("Financiero"):
-            partes = notif.mensaje.split("\n", 1)
-            cuerpo = partes[1].strip() if len(partes) > 1 else notif.mensaje
+        partes = notif.mensaje.split("\n", 1)
+        cuerpo = partes[1].strip() if len(partes) > 1 else notif.mensaje
         mensaje = f"{mensaje} {cuerpo}"
         if notif.urgente:
             tono = "urgente"
@@ -108,4 +112,5 @@ def generar_brief_tarjeta(tarjeta: Tarjeta, referencia: date | None = None) -> B
         mensaje=mensaje.strip(),
         tono=tono,
         datos_desactualizados=datos_viejos,
+        dias_sin_actividad=dias_sin_mov,
     )

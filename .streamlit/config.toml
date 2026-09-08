@@ -1,8 +1,12 @@
 [server]
-address = "127.0.0.1"
+# Lab local: 0.0.0.0 para laptop + teléfono en la misma WiFi.
+# Render/producción: el Procfile / render.yaml sobrescribe con --server.port=$PORT
+address = "0.0.0.0"
 port = 8501
 headless = true
 enableStaticServing = true
+enableCORS = false
+enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false

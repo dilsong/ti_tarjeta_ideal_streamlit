@@ -26,6 +26,8 @@ class DatosCaptura:
     saldo: float | None = None
     limite: float | None = None
     disponible: float | None = None
+    statement_balance: float | None = None
+    current_balance: float | None = None
     ultimos_digitos: str | None = None
     nombre_tarjeta: str | None = None
     pago_minimo: float | None = None
@@ -47,8 +49,35 @@ class DatosCaptura:
                 self.saldo,
                 self.limite,
                 self.disponible,
+                self.statement_balance,
+                self.current_balance,
                 self.ultimos_digitos,
                 self.nombre_tarjeta,
+                self.pago_minimo,
+                self.monto_vencido_atrasado,
+            )
+        )
+
+    def tiene_reglas_banco(self) -> bool:
+        return any(
+            v is not None
+            for v in (
+                self.limite,
+                self.dia_corte,
+                self.dia_pago,
+                self.apr,
+                self.late_fee,
+                self.pago_minimo,
+            )
+        )
+
+    def tiene_saldos_hoy(self) -> bool:
+        return any(
+            v is not None
+            for v in (
+                self.statement_balance,
+                self.current_balance,
+                self.saldo,
                 self.pago_minimo,
                 self.monto_vencido_atrasado,
             )
@@ -193,9 +222,11 @@ def texto_desde_imagen(imagen: Image.Image) -> str:
     from pytesseract import TesseractNotFoundError
 
     preparada = _preparar_imagen_ocr(imagen)
+    # spa+eng primero: statements US en inglés con UI en español (y viceversa).
     intentos: list[tuple[str, str]] = [
-        ("eng", "--psm 6"),
         ("spa+eng", "--psm 6"),
+        ("eng", "--psm 6"),
+        ("spa+eng", "--psm 4"),
         ("eng", "--psm 4"),
         ("spa+eng", "--psm 3"),
         ("eng", "--psm 11"),
@@ -387,14 +418,31 @@ def _monto_en_lineas(
 
 
 def _limpiar_texto_ocr(texto: str) -> str:
+    """Normaliza errores típicos de OCR en inglés y español (independiente del idioma de la UI)."""
     t = texto.replace("\u00a0", " ")
     for pat, rep in (
+        # Inglés
         (r"cred[i1l]t\s+lim[i1l]t", "Credit Limit"),
         (r"new\s+ba[il]ance", "New Balance"),
         (r"available\s+cred[i1l]t", "Available Credit"),
         (r"payment\s+due\s+date", "Payment Due Date"),
         (r"statement\s+closing\s+date", "Statement Closing Date"),
         (r"minimum\s+payment\s+due", "Minimum Payment Due"),
+        (r"past\s+due", "Past Due"),
+        (r"payment\s+to\s+avoid\s+interest", "Payment to avoid interest"),
+        (r"closing\s+date", "Closing Date"),
+        # Español
+        (r"l[ií]mite\s+de\s+cr[eé]dito", "Límite de crédito"),
+        (r"saldo\s+nuevo", "Saldo nuevo"),
+        (r"cr[eé]dito\s+disponible", "Crédito disponible"),
+        (r"fecha\s+l[ií]mite\s+de\s+pago", "Fecha límite de pago"),
+        (r"fecha\s+de\s+vencimiento(?:\s+del\s+pago)?", "Fecha de vencimiento del pago"),
+        (r"fecha\s+de\s+corte", "Fecha de corte"),
+        (r"monto\s+vencido(?:\s+atrasado)?", "Monto vencido"),
+        (r"saldo\s+vencido", "Saldo vencido"),
+        (r"pago\s+m[ií]nimo", "Pago mínimo"),
+        (r"pago\s+(?:para\s+)?sin\s+intereses", "Pago sin intereses"),
+        (r"pago\s+para\s+no\s+generar\s+intereses", "Pago para no generar intereses"),
     ):
         t = re.sub(pat, rep, t, flags=re.IGNORECASE)
     return t
@@ -408,16 +456,20 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     texto = _limpiar_texto_ocr(bruto)
 
-    # Fechas numéricas US (Credit One)
+    # Fechas numéricas US (Credit One) y ES
     m = re.search(
-        r"payment\s+due\s+date\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
+        r"(?:payment\s+due\s+date|due\s+date|pay\s+by|payment\s+date|"
+        r"fecha\s+l[ií]mite\s+de\s+pago|fecha\s+de\s+vencimiento(?:\s+del\s+pago)?|"
+        r"fecha\s+de\s+pago|vence\s+el)\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
         texto,
         re.IGNORECASE,
     )
     if m:
         r.dia_pago = _dia_desde_fecha(m.group(1))
     m = re.search(
-        r"(?:statement\s+closing\s+date|closing\s+date)\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
+        r"(?:statement\s+closing\s+date|closing\s+date|billing\s+date|"
+        r"fecha\s+de\s+cierre(?:\s+del\s+estado\s+de\s+cuenta)?|fecha\s+de\s+corte|"
+        r"fecha\s+de\s+facturaci[oó]n)\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
         texto,
         re.IGNORECASE,
     )
@@ -425,14 +477,20 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         r.dia_corte = _dia_desde_fecha(m.group(1))
 
     if r.dia_pago is None:
-        m = re.search(r"payment\s+due\s+date\s*[:\s]*(\d{1,2})\b", texto, re.IGNORECASE)
+        m = re.search(
+            r"(?:payment\s+due\s+date|due\s+date|pay\s+by|payment\s+date|"
+            r"fecha\s+l[ií]mite\s+de\s+pago|fecha\s+de\s+pago|vence\s+el)\s*[:\s]*(\d{1,2})\b",
+            texto,
+            re.IGNORECASE,
+        )
         if m:
             d = int(m.group(1))
             if 1 <= d <= 31:
                 r.dia_pago = d
     if r.dia_corte is None:
         m = re.search(
-            r"(?:statement\s+closing\s+date|closing\s+date)\s*[:\s]*(\d{1,2})\b",
+            r"(?:statement\s+closing\s+date|closing\s+date|billing\s+date|"
+            r"fecha\s+de\s+cierre|fecha\s+de\s+corte|fecha\s+de\s+facturaci[oó]n)\s*[:\s]*(\d{1,2})\b",
             texto,
             re.IGNORECASE,
         )
@@ -446,8 +504,13 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             r"fecha\s+de\s+vencimiento\s+del\s+pago",
             r"vencimiento\s+del\s+pago",
             r"fecha\s+l[ií]mite\s+de\s+pago",
+            r"fecha\s+de\s+pago",
+            r"vence\s+el",
             r"payment\s+due\s+date",
             r"payment\s+due",
+            r"due\s+date",
+            r"pay\s+by",
+            r"payment\s+date",
             r"paga\s+antes\s+del?",
         ):
             bloque = _bloque_tras_etiqueta(texto, etiq, 80)
@@ -458,7 +521,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                     break
     if r.dia_pago is None:
         m = re.search(
-            rf"(?:vencimiento\s+del\s+pago|payment\s+due)[^\n]{{0,40}}"
+            rf"(?:vencimiento\s+del\s+pago|fecha\s+de\s+pago|payment\s+due|due\s+date|pay\s+by)[^\n]{{0,40}}"
             rf"((?:{_MESES_ES}|{_MESES_EN})\.?\s+\d{{1,2}}(?:[,\s]+\d{{2,4}})?)",
             texto,
             re.IGNORECASE,
@@ -473,8 +536,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             r"fecha\s+de\s+cierre\s+del\s+pr[oó]ximo\s+estado\s+de\s+cuenta",
             r"fecha\s+de\s+cierre(?:\s+del\s+estado\s+de\s+cuenta)?",
             r"fecha\s+de\s+corte",
+            r"fecha\s+de\s+facturaci[oó]n",
             r"statement\s+closing\s+date",
             r"closing\s+date",
+            r"billing\s+date",
         ):
             bloque = _bloque_tras_etiqueta(texto, etiq, 80)
             if bloque:
@@ -507,7 +572,9 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     # Límite — Credit Limit / Límite de Crédito
     for pat in (
         rf"credit\s+limit\s*[:\s]*\$?\s*{_MONTO}",
+        rf"credit\s+line\s*[:\s]*\$?\s*{_MONTO}",
         rf"l[ií]mite\s+de\s+cr[eé]dito\s*[:\s]*\$?\s*{_MONTO}",
+        rf"l[ií]nea\s+de\s+cr[eé]dito\s*[:\s]*\$?\s*{_MONTO}",
         rf"l[ií]mite\s+total\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
@@ -520,7 +587,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.limite = val
                 break
     if r.limite is None:
-        for etiq in (r"credit\s+limit", r"l[ií]mite\s+de\s+cr[eé]dito"):
+        for etiq in (r"credit\s+limit", r"credit\s+line", r"l[ií]mite\s+de\s+cr[eé]dito", r"l[ií]nea\s+de\s+cr[eé]dito"):
             bloque = _bloque_tras_etiqueta(texto, etiq, 80)
             if not bloque or re.search(r"adelanto|cash\s*advance", bloque, re.I):
                 continue
@@ -529,22 +596,58 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.limite = val
                 break
 
-    # Saldo — New Balance / Saldo Nuevo
+    # Saldo en tiempo real — Current Balance (app del banco)
     for pat in (
-        rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
         rf"current\s+balance\s*[:\s]*\$?\s*{_MONTO}",
         rf"saldo\s+actual\s*[:\s]*\$?\s*{_MONTO}",
+        rf"balance\s+actual\s*[:\s]*\$?\s*{_MONTO}",
+        rf"outstanding\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        rf"total\s+balance\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:
             try:
-                r.saldo = _float_es(m)
+                r.current_balance = _float_es(m)
                 break
             except ValueError:
                 continue
-    if r.saldo is None:
-        for etiq in (r"new\s+balance", r"saldo\s+nuevo", r"current\s+balance", r"saldo\s+actual"):
+    if r.current_balance is None:
+        for etiq in (
+            r"current\s+balance",
+            r"saldo\s+actual",
+            r"balance\s+actual",
+            r"outstanding\s+balance",
+        ):
+            bloque = _bloque_tras_etiqueta(texto, etiq, 40)
+            if not bloque:
+                continue
+            val = _primer_monto(bloque.splitlines()[0] if bloque.splitlines() else bloque)
+            if val is not None:
+                r.current_balance = val
+                break
+
+    # Saldo al corte — Statement Balance / New Balance
+    for pat in (
+        rf"statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
+        rf"saldo\s+al\s+corte\s*[:\s]*\$?\s*{_MONTO}",
+        rf"saldo\s+del\s+estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            try:
+                r.statement_balance = _float_es(m)
+                break
+            except ValueError:
+                continue
+    if r.statement_balance is None:
+        for etiq in (
+            r"statement\s+balance",
+            r"new\s+balance",
+            r"saldo\s+nuevo",
+            r"saldo\s+al\s+corte",
+        ):
             bloque = _bloque_tras_etiqueta(texto, etiq, 40)
             if not bloque:
                 continue
@@ -553,13 +656,32 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 continue
             val = _primer_monto(primera)
             if val is not None:
-                r.saldo = val
+                r.statement_balance = val
                 break
+
+    # Compatibilidad: saldo genérico si no hay desglose
+    if r.current_balance is None and r.statement_balance is None:
+        for pat in (
+            rf"saldo\s+total\s*[:\s]*\$?\s*{_MONTO}",
+        ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                try:
+                    r.saldo = _float_es(m)
+                    break
+                except ValueError:
+                    continue
+    if r.saldo is None:
+        r.saldo = r.current_balance if r.current_balance is not None else r.statement_balance
+    elif r.current_balance is None and r.statement_balance is None:
+        r.current_balance = r.saldo
 
     # Disponible
     for pat in (
         rf"available\s+credit\s*[:\s]*\$?\s*{_MONTO}",
-        rf"cr[eé]dito\s+disponible\s*[:\s]*\$?\s*{_MONTO}",
+        rf"available\s+(?:for\s+purchases\s+)?(?:credit\s+)?[:\s]*\$?\s*{_MONTO}",
+        rf"cr[eé]dito\s+disponible\s*(?:para\s+compras)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"disponible\s+para\s+compras\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:
@@ -569,7 +691,12 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             except ValueError:
                 continue
     if r.disponible is None:
-        for etiq in (r"available\s+credit", r"cr[eé]dito\s+disponible"):
+        for etiq in (
+            r"available\s+credit",
+            r"available\s+for\s+purchases",
+            r"cr[eé]dito\s+disponible",
+            r"disponible\s+para\s+compras",
+        ):
             bloque = _bloque_tras_etiqueta(texto, etiq, 100)
             if not bloque or re.search(r"adelanto|cash\s*advance", bloque, re.I):
                 continue
@@ -578,8 +705,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.disponible = val
                 break
 
-    if r.saldo is None and r.limite is not None and r.disponible is not None:
-        r.saldo = max(0.0, round(r.limite - r.disponible, 2))
+    if r.disponible is None and r.limite is not None:
+        uso = r.current_balance if r.current_balance is not None else r.saldo
+        if uso is not None:
+            r.disponible = max(0.0, round(r.limite - uso, 2))
     if r.disponible is None and r.limite is not None and r.saldo is not None:
         r.disponible = max(0.0, round(r.limite - r.saldo, 2))
 
@@ -599,6 +728,9 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
         rf"pago\s+{_MINIMO}\s+requerido\s*[:\s]*\$?\s*{_MONTO}",
         rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
+        rf"min(?:imum)?\s+payment\s+due\s*[:\s]*\$?\s*{_MONTO}",
+        rf"importe\s+{_MINIMO}\s*[:\s]*\$?\s*{_MONTO}",
+        rf"amount\s+due\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:
@@ -621,6 +753,9 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             rf"{_MINIMO}\s+a\s+pagar",
             rf"pago\s+{_MINIMO}",
             r"minimum\s+payment",
+            r"min(?:imum)?\s+payment",
+            r"importe\s+m[íi]nimo",
+            r"amount\s+due",
         )
         for etiq in etiquetas_min:
             val = _monto_en_lineas(texto, etiq, lineas=3, excluir=ruido)
@@ -655,7 +790,9 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     for pat in (
         r"(?:Purchase\s+)?APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        r"Variable\s+APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
         r"Tasa\s+(?:de\s+)?inter[eé]s\s+(?:ordinari[ao]\s+)?anual[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        r"Tasa\s+ordinaria[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
         r"(?:Annual\s+Percentage\s+Rate|APR)\s*(?:for\s+Purchases)?[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
@@ -667,9 +804,15 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     if m:
         r.penalty_apr = float(m.group(1).replace(",", "."))
     if r.penalty_apr is None:
-        m = re.search(r"Tasa\s+moratoria[:\s]*([\d]+(?:[.,]\d+)?)\s*%", texto, re.IGNORECASE)
-        if m:
-            r.penalty_apr = float(m.group(1).replace(",", "."))
+        for pat in (
+            r"Tasa\s+moratoria[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+            r"Tasa\s+de\s+mora[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+            r"Default\s+APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                r.penalty_apr = float(m.group(1).replace(",", "."))
+                break
 
     # Cargo por atraso ≠ tasa anual ni tasa moratoria
     for pat in (
@@ -688,41 +831,47 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     for pat in (
         r"Annual\s+Fee[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
         r"Anualidad[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Membership\s+Fee[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Cuota\s+anual[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:
             r.annual_fee = float(m.group(1).replace(",", "."))
             break
 
-    # Pago para no generar intereses (= saldo nuevo / pay in full)
     for pat in (
-        rf"pago\s+(?:para\s+)?(?:no\s+generar\s+intereses|sin\s+intereses)\s*[:\s]*\$?\s*{_MONTO}",
-        rf"payment\s+to\s+avoid\s+interest\s*[:\s]*\$?\s*{_MONTO}",
-        rf"pay\s+(?:in\s+)?full\s*(?:amount)?\s*[:\s]*\$?\s*{_MONTO}",
-        rf"new\s+balance\s+payment\s*[:\s]*\$?\s*{_MONTO}",
-        rf"pago\s+del\s+saldo\s+(?:total|nuevo)\s*[:\s]*\$?\s*{_MONTO}",
+        r"Finance\s+Charge[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Interest\s+Charged[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Intereses\s+(?:del\s+periodo|del\s+ciclo|facturados)[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"Cargos?\s+por\s+inter[eé]s[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
         if m:
-            try:
-                val = _float_es(m)
-            except ValueError:
-                continue
-            if val > 0:
-                r.pago_sin_intereses = val
-                break
-    if r.pago_sin_intereses is None and r.saldo is not None and r.saldo > 0:
-        # En la mayoría de bancos, pagar el saldo nuevo evita intereses del ciclo.
-        r.pago_sin_intereses = r.saldo
+            r.finance_charge = float(m.group(1).replace(",", "."))
+            break
 
-    # Past Due / monto vencido de meses anteriores (distinto del saldo del ciclo)
+    for pat in (
+        r"Daily\s+Periodic\s+Rate[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        r"Tasa\s+diaria[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        r"Daily\s+Rate[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            r.daily_rate = float(m.group(1).replace(",", "."))
+            break
+
+    # Past Due / monto vencido (antes de inferir pago del ciclo)
     for pat in (
         rf"past\s+due\s+(?:amount|balance|payment)?\s*[:\s]*\$?\s*{_MONTO}",
-        rf"overdue\s+(?:amount|balance)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"amount\s+past\s+due\s*[:\s]*\$?\s*{_MONTO}",
+        rf"overdue\s+(?:amount|balance|payment)?\s*[:\s]*\$?\s*{_MONTO}",
         rf"monto\s+vencido\s*(?:atrasado)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"importe\s+vencido\s*[:\s]*\$?\s*{_MONTO}",
         rf"saldo\s+vencido\s*[:\s]*\$?\s*{_MONTO}",
+        rf"saldo\s+en\s+mora\s*[:\s]*\$?\s*{_MONTO}",
         rf"monto\s+atrasado\s*[:\s]*\$?\s*{_MONTO}",
         rf"deuda\s+vencida\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+vencido\s*[:\s]*\$?\s*{_MONTO}",
         rf"past\s+due\s*[:\s]*\$?\s*{_MONTO}",
     ):
         m = re.search(pat, texto, re.IGNORECASE)
@@ -735,20 +884,98 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.monto_vencido_atrasado = val
                 break
     if r.monto_vencido_atrasado is None:
-        for etiq in (
+        etiquetas_past_due = (
             r"past\s+due",
+            r"amount\s+past\s+due",
             r"monto\s+vencido",
+            r"importe\s+vencido",
             r"saldo\s+vencido",
+            r"saldo\s+en\s+mora",
             r"monto\s+atrasado",
             r"overdue",
-        ):
+            r"deuda\s+vencida",
+        )
+        for etiq in etiquetas_past_due:
             val = _monto_en_lineas(texto, etiq, lineas=2)
             if val is not None and val > 0:
                 if r.saldo is None or abs(val - r.saldo) > 0.01:
                     r.monto_vencido_atrasado = val
                     break
+        if r.monto_vencido_atrasado is None:
+            for etiq in etiquetas_past_due:
+                val = _monto_huerfano_tras_etiqueta(
+                    texto,
+                    etiq,
+                    excluir=(r.saldo, r.limite, r.disponible, r.pago_minimo),
+                )
+                if val is not None and val > 0:
+                    if r.saldo is None or abs(val - r.saldo) > 0.01:
+                        r.monto_vencido_atrasado = val
+                        break
+
+    # Pago para no generar intereses (= saldo nuevo / pay in full)
+    for pat in (
+        rf"pago\s+(?:para\s+)?(?:no\s+generar\s+intereses|sin\s+intereses)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"payment\s+to\s+avoid\s+interest\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pay\s+(?:in\s+)?full\s*(?:amount)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"new\s+balance\s+payment\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+del\s+saldo\s+(?:total|nuevo)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+total\s*[:\s]*\$?\s*{_MONTO}",
+        rf"total\s+payment\s+(?:due|amount)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        rf"amount\s+to\s+pay\s*[:\s]*\$?\s*{_MONTO}",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            try:
+                val = _float_es(m)
+            except ValueError:
+                continue
+            if val > 0:
+                r.pago_sin_intereses = val
+                break
+    if r.pago_sin_intereses is None:
+        etiquetas_pago_ciclo = (
+            r"payment\s+to\s+avoid\s+interest",
+            r"pay\s+in\s+full",
+            r"pago\s+sin\s+intereses",
+            r"pago\s+para\s+no\s+generar\s+intereses",
+            r"pago\s+total",
+            r"total\s+payment",
+            r"amount\s+to\s+pay",
+        )
+        for etiq in etiquetas_pago_ciclo:
+            val = _monto_en_lineas(texto, etiq, lineas=3)
+            if val is not None and val > 0:
+                r.pago_sin_intereses = val
+                break
+        if r.pago_sin_intereses is None:
+            for etiq in etiquetas_pago_ciclo:
+                val = _monto_huerfano_tras_etiqueta(
+                    texto,
+                    etiq,
+                    excluir=(r.monto_vencido_atrasado, r.pago_minimo),
+                )
+                if val is not None and val > 0:
+                    r.pago_sin_intereses = val
+                    break
+    if r.pago_sin_intereses is None and r.statement_balance is not None and r.statement_balance > 0:
+        r.pago_sin_intereses = r.statement_balance
+    if r.pago_sin_intereses is None and r.saldo is not None and r.saldo > 0:
+        # En la mayoría de bancos, pagar el saldo nuevo evita recargos del ciclo.
+        r.pago_sin_intereses = r.saldo
 
     return r
+
+
+def procesar_ocr_reglas(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
+    """Paso 1: reglas del banco (límite, fechas, tasas, comisiones)."""
+    return procesar_imagen_y_texto(imagen, texto_manual)
+
+
+def procesar_ocr_saldos(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
+    """Paso 2: saldos en tiempo real (app del banco)."""
+    return procesar_imagen_y_texto(imagen, texto_manual)
 
 
 def _completar_vacios(destino: DatosCaptura, extra: DatosCaptura) -> DatosCaptura:

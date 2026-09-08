@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.components.caja_alerta import render_cuadro_deuda_clara, render_caja_alerta
 from app.components.intereses_panel import render_panel_intereses
 from app.components.pagos_estatus import render_actualizar_estatus
 from app.components.theme import CARD_COLORS, ESTADO_COLORS
+from app.core.estrategia_deuda import MONTO_EXTRA_DEFAULT, recomendar_abono_extra
 from app.core.fechas import formatear_fecha
+from app.core.salud_tarjeta import evaluar_prioridad_pago, fmt_dinero, tiene_atraso
 from app.core.tarjetas import EstadoSalud, Tarjeta, listar_tarjetas
 from app.core.validacion_ciclo import validar_ciclo_con_intereses
 from app.i18n.translator import get_language, t
@@ -13,9 +16,11 @@ from app.ui.helpers import TARJETA_SEL_KEY, fila_accion
 from app.ui.tabs._badges import _label_salud, estado_riesgo_pago
 
 
-def _urgencia_score(tarjeta: Tarjeta) -> tuple[int, float, float]:
+def _urgencia_score(tarjeta: Tarjeta) -> tuple[int, int, float, float]:
     estado = validar_ciclo_con_intereses(tarjeta)
+    mora = 0 if tiene_atraso(tarjeta) else 1
     return (
+        mora,
         estado.dias_hasta_pago,
         -estado.monto_adeudado_ciclo_anterior,
         -estado.consumos_ciclo_actual,
@@ -52,11 +57,38 @@ def _html_tarjeta_pago(
         if estado.fecha_pago_proximo
         else "—"
     )
+    if tiene_atraso(tarjeta):
+        prio = evaluar_prioridad_pago(tarjeta)
+        monto_html = (
+            f'<div class="ti-deuda-etiq">{t("salud_tarjeta.etiq_vencido")}</div>'
+            f'<span style="color:#EF4444;font-weight:700;font-size:1.35rem;">'
+            f'{fmt_dinero(prio.monto_urgente)}</span>'
+            f'<div style="color:#94A3B8;font-size:0.78rem;margin-top:0.35rem;line-height:1.35;">'
+            f'{t("salud_tarjeta.etiq_vencido_corto")}</div>'
+            f'<div style="color:#64748B;font-size:0.75rem;margin-top:0.5rem;">'
+            f'{t("salud_tarjeta.etiq_ciclo")}: {fmt_dinero(prio.monto_ciclo)}</div>'
+        )
+        dias_html = (
+            f'<span style="color:#EF4444;font-weight:600;font-size:0.82rem;text-align:right;'
+            f'line-height:1.35;">{t("tabs.pagos_mora_hoy", dias=prio.dias_atraso_mora)}</span>'
+        )
+    else:
+        monto_html = (
+            f'<div class="ti-deuda-etiq">{t("salud_tarjeta.etiq_ciclo")}</div>'
+            f'<span style="color:#EF4444;font-weight:700;font-size:1.35rem;">'
+            f'{fmt_dinero(monto)}</span>'
+            f'<div style="color:#94A3B8;font-size:0.78rem;margin-top:0.35rem;line-height:1.35;">'
+            f'{t("salud_tarjeta.etiq_ciclo_sub", pago=pago_txt, dias=estado.dias_hasta_pago)}</div>'
+        )
+        dias_html = (
+            f'<span style="color:#E2E8F0;font-size:0.9rem;text-align:right;">'
+            f'{estado.dias_hasta_pago} {t("tabs.pagos_dias")}<br/>{pago_txt}</span>'
+        )
     acum_html = ""
     if acum > 0:
         acum_html = (
             f'<div style="color:#6366F1;font-size:0.82rem;margin-top:0.35rem;font-weight:600;">'
-            f'{t("tabs.pagos_etiq_acumulando")}: ${acum:,.2f}</div>'
+            f'{t("tabs.pagos_etiq_acumulando")}: {fmt_dinero(acum)}</div>'
         )
 
     return (
@@ -68,14 +100,7 @@ def _html_tarjeta_pago(
         f'<div style="color:#94A3B8;font-size:0.85rem;margin-top:0.35rem;">'
         f'{tarjeta.banco} · •••• {tarjeta.ultimos_digitos}</div>'
         f'<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:0.5rem;">'
-        f'<div>'
-        f'<div style="color:#94A3B8;font-size:0.72rem;font-weight:600;text-transform:uppercase;">'
-        f'{t("tabs.pagos_monto_ciclo")}</div>'
-        f'<span style="color:#EF4444;font-weight:700;font-size:1.35rem;">${monto:,.2f}</span>'
-        f'{acum_html}'
-        f'</div>'
-        f'<span style="color:#E2E8F0;font-size:0.9rem;text-align:right;">'
-        f'{estado.dias_hasta_pago} {t("tabs.pagos_dias")}<br/>{pago_txt}</span>'
+        f'<div>{monto_html}{acum_html}</div>{dias_html}'
         f'</div></div>'
     )
 
@@ -101,27 +126,41 @@ def _render_lista_tarjetas(tarjetas: list[Tarjeta], tarjeta_sel: Tarjeta, idioma
         st.markdown("<div style='height:0.15rem;'></div>", unsafe_allow_html=True)
 
 
-def _render_mensaje_estado(estado_sel, riesgo_sel: EstadoSalud, idioma: str) -> None:
+def _render_mensaje_estado(estado_sel, riesgo_sel: EstadoSalud, tarjeta: Tarjeta, idioma: str) -> None:
     deuda = estado_sel.monto_adeudado_ciclo_anterior
     acum = estado_sel.consumos_ciclo_actual
     pago_txt = formatear_fecha(estado_sel.fecha_pago_proximo, idioma) if estado_sel.fecha_pago_proximo else "—"
 
+    if tiene_atraso(tarjeta):
+        render_cuadro_deuda_clara(tarjeta, idioma)
+        return
+
     if deuda <= 0 and acum <= 0:
         st.success(t("tabs.pagos_sin_deuda"))
     elif deuda <= 0 and acum > 0:
-        st.info(t("tabs.pagos_sin_deuda_con_acumulado", monto=acum))
+        render_caja_alerta(
+            t("tabs.pagos_sin_deuda_con_acumulado", monto=fmt_dinero(acum)),
+            "info",
+        )
     elif riesgo_sel == EstadoSalud.NEGATIVO:
-        st.error(t("tabs.pagos_urgente", monto=deuda, dias=estado_sel.dias_hasta_pago))
+        render_caja_alerta(
+            t("tabs.pagos_urgente", monto=fmt_dinero(deuda), dias=estado_sel.dias_hasta_pago),
+            "urgente",
+        )
     elif riesgo_sel == EstadoSalud.MEDIO and estado_sel.dias_hasta_pago <= 7:
-        st.warning(t("tabs.pagos_atencion", monto=deuda, dias=estado_sel.dias_hasta_pago))
+        render_caja_alerta(
+            t("tabs.pagos_atencion", monto=fmt_dinero(deuda), dias=estado_sel.dias_hasta_pago),
+            "warn",
+        )
     elif deuda > 0:
-        st.info(
+        render_caja_alerta(
             t(
                 "tabs.pagos_tranquilo",
-                monto=deuda,
+                monto=fmt_dinero(deuda),
                 dias=estado_sel.dias_hasta_pago,
                 pago=pago_txt,
-            )
+            ),
+            "info",
         )
 
 
@@ -135,13 +174,17 @@ def render(tarjeta_sel: Tarjeta, *, compacto: bool = False, key_prefix: str = ""
     else:
         st.subheader(t("tabs.pagos_titulo"))
         st.caption(t("tabs.pagos_subtitulo"))
+        tip = recomendar_abono_extra(tarjetas, MONTO_EXTRA_DEFAULT)
+        if tip and len(tarjetas) >= 2 and tip.tarjeta.id != tarjeta_sel.id:
+            st.markdown(f"**{t('estrategia.titulo')}**")
+            render_caja_alerta(tip.mensaje, "urgente" if tip.urgente else "info")
         _render_lista_tarjetas(tarjetas, tarjeta_sel, idioma)
         st.divider()
         st.markdown(f"**{t('tabs.pagos_detalle')} · {tarjeta_sel.nombre}**")
 
     estado_sel = validar_ciclo_con_intereses(tarjeta_sel)
     riesgo_sel = estado_riesgo_pago(tarjeta_sel)
-    _render_mensaje_estado(estado_sel, riesgo_sel, idioma)
+    _render_mensaje_estado(estado_sel, riesgo_sel, tarjeta_sel, idioma)
 
     st.divider()
     render_panel_intereses(tarjeta_sel, key_prefix=key_prefix)

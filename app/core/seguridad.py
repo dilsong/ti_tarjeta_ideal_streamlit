@@ -1,7 +1,7 @@
 """
-Gestión del PIN local encriptado.
+Gestión del PIN local encriptado (monousuario).
 
-Primera vez: crear PIN de 4 dígitos.
+Primera vez: crear PIN de 4 a 6 dígitos.
 Siguientes veces: verificar PIN.
 Sin usuarios, perfiles ni autenticación remota.
 """
@@ -16,6 +16,13 @@ from typing import Any
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _CONFIG_FILE = _DATA_DIR / "config.json"
+_PIN_MIN = 4
+_PIN_MAX = 6
+
+
+def pin_valido(pin: str) -> bool:
+    """PIN numérico de 4 a 6 dígitos."""
+    return bool(pin) and pin.isdigit() and _PIN_MIN <= len(pin) <= _PIN_MAX
 
 
 def _load_config() -> dict[str, Any]:
@@ -51,8 +58,8 @@ def pin_configurado() -> bool:
 
 
 def crear_pin(pin: str) -> bool:
-    """Crea y persiste un PIN de 4 dígitos encriptado localmente."""
-    if len(pin) != 4 or not pin.isdigit():
+    """Crea y persiste un PIN de 4–6 dígitos encriptado localmente."""
+    if not pin_valido(pin):
         return False
 
     salt = secrets.token_bytes(32)
@@ -65,6 +72,8 @@ def crear_pin(pin: str) -> bool:
 
 def verificar_pin(pin: str) -> bool:
     """Verifica el PIN contra el hash almacenado localmente."""
+    if not pin_valido(pin):
+        return False
     config = _load_config()
     salt_hex = config.get("pin_salt", "")
     pin_hash = config.get("pin_hash", "")

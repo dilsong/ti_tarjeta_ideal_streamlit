@@ -14,6 +14,7 @@ from PIL import Image
 
 from app.components.theme import BANCOS_DEFAULT, BANCOS_USA
 from app.core.intereses import BASE_DIAS_ANIO
+from app.core.salud_tarjeta import fmt_dinero
 from app.core.tarjetas import Tarjeta, guardar_tarjeta, listar_tarjetas
 from app.i18n.translator import t
 
@@ -45,15 +46,55 @@ class GuiaBanco:
     ejemplos: list[str] = field(default_factory=list)
 
 
-def _catalogo_guias() -> dict[str, dict]:
-    from app.i18n.translator import get_language
+# Palabras clave de extractos — siempre EN+ES, independiente del idioma de la UI.
+_STATEMENT_OCR_KEYWORDS: tuple[str, ...] = (
+    "Past Due",
+    "New Balance",
+    "Payment Due Date",
+    "Minimum Payment",
+    "Payment to avoid interest",
+    "Closing Date",
+    "Credit Limit",
+    "Available Credit",
+    "Monto vencido",
+    "Saldo nuevo",
+    "Fecha límite de pago",
+    "Pago mínimo",
+    "Pago sin intereses",
+    "Fecha de corte",
+    "Límite de crédito",
+    "Crédito disponible",
+)
 
-    lang = get_language()
-    path = Path(__file__).resolve().parent.parent / "app" / "i18n" / f"guias_{lang}.json"
-    if not path.exists():
-        path = Path(__file__).resolve().parent.parent / "app" / "i18n" / "guias_es.json"
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
+
+def _catalogo_guias() -> dict[str, dict]:
+    """Fusiona guías ES+EN para que las pistas incluyan ambos idiomas."""
+    base = Path(__file__).resolve().parent.parent / "app" / "i18n"
+    merged: dict[str, dict] = {}
+    for nombre in ("guias_es.json", "guias_en.json"):
+        path = base / nombre
+        if not path.exists():
+            continue
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+        for slug, raw in data.items():
+            if slug not in merged:
+                merged[slug] = {
+                    "secciones": list(raw.get("secciones", [])),
+                    "palabras_clave": list(raw.get("palabras_clave", [])),
+                    "ejemplos": list(raw.get("ejemplos", [])),
+                }
+            else:
+                for k in raw.get("palabras_clave", []):
+                    if k not in merged[slug]["palabras_clave"]:
+                        merged[slug]["palabras_clave"].append(k)
+                for e in raw.get("ejemplos", []):
+                    if e not in merged[slug]["ejemplos"]:
+                        merged[slug]["ejemplos"].append(e)
+                for s in raw.get("secciones", []):
+                    if s not in merged[slug]["secciones"]:
+                        merged[slug]["secciones"].append(s)
+    return merged
 
 
 def _slug_banco(banco: str) -> str:
@@ -154,9 +195,13 @@ def listar_bancos_guia() -> list[str]:
 def _guia_para_banco(banco: str) -> GuiaBanco:
     slug = _slug_banco(banco)
     raw = _catalogo_guias().get(slug, _catalogo_guias().get("otro", {}))
+    claves = list(raw.get("palabras_clave", []))
+    for k in _STATEMENT_OCR_KEYWORDS:
+        if k not in claves:
+            claves.append(k)
     return GuiaBanco(
         secciones=list(raw.get("secciones", [])),
-        palabras_clave=list(raw.get("palabras_clave", [])),
+        palabras_clave=claves,
         ejemplos=list(raw.get("ejemplos", [])),
     )
 
@@ -229,17 +274,17 @@ def generar_resumen(resultados: ResultadosOCR) -> None:
         return
 
     if resultados.limite is not None:
-        st.markdown(f"- Límite: **{resultados.limite:,.2f}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_limite', monto=fmt_dinero(resultados.limite))}")
     if resultados.saldo is not None:
-        st.markdown(f"- Saldo / adeudado: **{resultados.saldo:,.2f}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_saldo', monto=fmt_dinero(resultados.saldo))}")
     if resultados.disponible is not None:
-        st.markdown(f"- Disponible: **{resultados.disponible:,.2f}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_disponible', monto=fmt_dinero(resultados.disponible))}")
     if resultados.dia_corte is not None:
-        st.markdown(f"- Día de corte: **{resultados.dia_corte}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_dia_corte', dia=resultados.dia_corte)}")
     if resultados.dia_pago is not None:
-        st.markdown(f"- Día de pago: **{resultados.dia_pago}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_dia_pago', dia=resultados.dia_pago)}")
     if resultados.ultimos_digitos:
-        st.markdown(f"- Últimos 4: **{resultados.ultimos_digitos}**")
+        st.markdown(f"- {t('ayuda_bancos.linea_ultimos4', digitos=resultados.ultimos_digitos)}")
 
     if resultados.late_fee is not None or resultados.finance_charge is not None:
         st.markdown(t("ayuda_bancos.interpretacion_cargos"))
@@ -249,10 +294,12 @@ def generar_resumen(resultados: ResultadosOCR) -> None:
         st.markdown(t("ayuda_bancos.interpretacion_tasas"))
 
     if resultados.late_fee is not None:
-        st.markdown(f"- {t('ayuda_bancos.linea_late_fee', monto=resultados.late_fee)}")
+        st.markdown(f"- {t('ayuda_bancos.linea_late_fee', monto=fmt_dinero(resultados.late_fee))}")
 
     if resultados.finance_charge is not None:
-        st.markdown(f"- {t('ayuda_bancos.linea_finance', monto=resultados.finance_charge)}")
+        st.markdown(
+            f"- {t('ayuda_bancos.linea_finance', monto=fmt_dinero(resultados.finance_charge))}"
+        )
 
     if resultados.penalty_apr is not None:
         st.markdown(f"- {t('ayuda_bancos.linea_penalty', apr=resultados.penalty_apr)}")
@@ -265,7 +312,9 @@ def generar_resumen(resultados: ResultadosOCR) -> None:
         st.markdown(f"- {t('ayuda_bancos.linea_diaria', tasa=diaria, base=BASE_DIAS_ANIO)}")
 
     if resultados.annual_fee is not None:
-        st.markdown(f"- {t('ayuda_bancos.linea_annual_fee', monto=resultados.annual_fee)}")
+        st.markdown(
+            f"- {t('ayuda_bancos.linea_annual_fee', monto=fmt_dinero(resultados.annual_fee))}"
+        )
 
     if resultados.daily_rate is not None:
         st.markdown(f"- {t('ayuda_bancos.linea_daily', tasa=resultados.daily_rate)}")
@@ -415,10 +464,7 @@ def mapa_ayuda_bancaria(tarjeta_sel: Tarjeta | None = None, *, key_prefix: str =
         imagen_prev = Image.open(BytesIO(captura.getvalue()))
         st.image(imagen_prev, caption=t("ayuda_bancos.vista_previa"), use_container_width=True)
     if not _ocr_disponible():
-        st.info(
-            t("ayuda_bancos.ocr_no_disponible")
-            + " Puedes pegar el texto de la captura en el cuadro de abajo y analizar."
-        )
+        st.info(t("ayuda_bancos.ocr_no_disponible_pegar"))
 
     puede_analizar = bool(captura or texto_manual.strip())
     resultados: ResultadosOCR | None = None
@@ -432,10 +478,7 @@ def mapa_ayuda_bancaria(tarjeta_sel: Tarjeta | None = None, *, key_prefix: str =
         imagen = Image.open(BytesIO(captura.getvalue())) if captura else Image.new("RGB", (1, 1), "white")
         resultados = procesar_captura(imagen, texto_manual=texto_manual)
         if captura and not resultados.texto_crudo.strip() and not texto_manual.strip():
-            st.warning(
-                "No se pudo leer texto de la imagen (OCR no disponible). "
-                "Pega el texto de la captura en el cuadro manual y vuelve a analizar."
-            )
+            st.warning(t("ayuda_bancos.ocr_imagen_sin_texto"))
         st.session_state[ocr_key] = resultados.to_dict()
         st.session_state[ocr_texto_key] = resultados.texto_crudo
 
@@ -448,6 +491,12 @@ def mapa_ayuda_bancaria(tarjeta_sel: Tarjeta | None = None, *, key_prefix: str =
             annual_fee=data.get("annual_fee"),
             daily_rate=data.get("daily_rate"),
             finance_charge=data.get("finance_charge"),
+            dia_corte=data.get("dia_corte"),
+            dia_pago=data.get("dia_pago"),
+            saldo=data.get("saldo"),
+            limite=data.get("limite"),
+            disponible=data.get("disponible"),
+            ultimos_digitos=data.get("ultimos_digitos"),
             texto_crudo=st.session_state.get(ocr_texto_key, ""),
         )
         st.divider()

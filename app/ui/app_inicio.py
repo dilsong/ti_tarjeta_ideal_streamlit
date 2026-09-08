@@ -8,12 +8,15 @@ from html import escape
 
 import streamlit as st
 
+from app.components.caja_alerta import html_cuadro_deuda_clara, render_caja_alerta
+from app.components.theme import CARD_COLORS
 from app.core.asesor_diario import generar_brief_tarjeta
 from app.components.dialogo_pago_banco import confirmar_pago_en_banco
+from app.core.estrategia_deuda import MONTO_EXTRA_DEFAULT, recomendar_abono_extra
 from app.core.pagos import calcular_sugerencia_abono
-from app.core.salud_tarjeta import listar_tarjetas_con_atraso, mensaje_alerta_atraso, prioridad_pago
+from app.core.salud_tarjeta import tiene_atraso
 from app.core.tarjetas import listar_tarjetas
-from app.i18n.translator import t
+from app.i18n.translator import get_language, t
 from app.ui.helpers import render_abanico_global, render_page_header
 from app.ui.tabs import (
     tab_configurar_tarjetas,
@@ -31,21 +34,22 @@ def _dinero(valor: float) -> str:
 
 def _render_banner_alerta(texto: str, nivel: str) -> None:
     """Banner con HTML — st.warning interpreta $ como LaTeX y rompe el texto."""
-    clase = {
-        "urgente": "ti-banner-alerta--urgente",
-        "warn": "ti-banner-alerta--warn",
-        "info": "ti-banner-alerta--info",
-    }[nivel]
-    cuerpo = escape(texto).replace("\n", "<br/>")
-    st.markdown(
-        f'<div class="ti-banner-alerta {clase}">{cuerpo}</div>',
-        unsafe_allow_html=True,
-    )
+    render_caja_alerta(texto, nivel)
 
 
 def _mensaje_sugerencia(sug) -> tuple[str, str]:
     monto = _dinero(sug.monto)
     deuda = _dinero(sug.deuda_ciclo)
+
+    if sug.escenario == "past_due":
+        principal = t(
+            "banner_sugerencia.past_due_urgente",
+            monto=monto,
+            dias=sug.dias_restantes,
+        )
+        secundaria = t("banner_sugerencia.past_due_nota_ciclo", ciclo=deuda)
+        return f"{principal}\n\n{secundaria}", ""
+
     if sug.escenario == "ciclo_pendiente":
         if sug.es_pago_total:
             principal = t(
@@ -85,85 +89,119 @@ def _mensaje_sugerencia(sug) -> tuple[str, str]:
     return principal, secundaria
 
 
-def _render_banner_emergencia_atraso(tarjetas) -> None:
-    """🚨 Arriba de todo si alguna tarjeta tiene deuda vencida (Past Due)."""
-    con_atraso = listar_tarjetas_con_atraso(tarjetas)
-    if not con_atraso:
-        return
-    for tarjeta in prioridad_pago(con_atraso):
-        _render_banner_alerta(mensaje_alerta_atraso(tarjeta), "urgente")
+def _render_boton_abono(tarjeta, sugerencia, msg_key: str) -> None:
+    st.caption(t("banner_sugerencia.aviso_no_banco"))
+    monto_btn = _dinero(sugerencia.monto)
+    etiqueta_boton = (
+        t("banner_sugerencia.boton_pago_total", monto=monto_btn)
+        if sugerencia.es_pago_total
+        else t("banner_sugerencia.boton_pago_parcial", monto=monto_btn)
+        if sugerencia.escenario == "ciclo_pendiente"
+        else t("banner_sugerencia.boton_abono", monto=monto_btn)
+    )
+    if st.button(
+        etiqueta_boton,
+        key=f"banner_abono_{tarjeta.id}",
+        type="primary",
+        use_container_width=True,
+    ):
+        confirmar_pago_en_banco(
+            tarjeta,
+            tipo="abono",
+            monto_txt=monto_btn,
+            monto=sugerencia.monto,
+            es_pago_total=sugerencia.es_pago_total,
+            escenario=sugerencia.escenario,
+            msg_key=msg_key,
+        )
 
 
-def _render_brief_asesor(tarjeta) -> None:
+def _borde_asesor(tarjeta) -> str:
+    """Color del borde del asesor = color exacto de la tarjeta del abanico."""
+    return CARD_COLORS.get(getattr(tarjeta, "color", "") or "azul", CARD_COLORS["azul"])
+
+
+def _render_prioridad_unificada(tarjeta) -> None:
+    """
+    Un solo cuadro de prioridad para la tarjeta del abanico + botón de acción.
+    Con Past Due: VENCIDO (HOY) + CICLO ACTUAL, sin banners duplicados.
+    """
+    msg_key = f"banner_abono_ok_{tarjeta.id}"
+    if msg_key in st.session_state:
+        st.success(st.session_state.pop(msg_key))
+
     brief = generar_brief_tarjeta(tarjeta)
-    tono_cls = {
-        "urgente": "ti-asesor-hoy--urgente",
-        "atencion": "ti-asesor-hoy--atencion",
-        "info": "ti-asesor-hoy--info",
-        "tranquilo": "ti-asesor-hoy--tranquilo",
-    }.get(brief.tono, "ti-asesor-hoy--tranquilo")
+    sugerencia = calcular_sugerencia_abono(tarjeta)
+    notif = evaluar_notificaciones_tarjeta(tarjeta)
+    borde = _borde_asesor(tarjeta)
+
+    if tiene_atraso(tarjeta):
+        deuda_html = html_cuadro_deuda_clara(tarjeta, get_language(), envolver=False)
+        nota_vieja = ""
+        if brief.datos_desactualizados:
+            nota_vieja = (
+                f'<div class="ti-asesor-msg" style="margin-top:0.65rem;opacity:0.9;">'
+                f"{escape(t('asesor_diario.datos_viejos', dias=brief.dias_sin_actividad))}"
+                f"</div>"
+            )
+        st.markdown(
+            f'<div class="ti-asesor-hoy" style="border-left:4px solid {borde};">'
+            f'<div class="ti-asesor-saludo">{escape(brief.saludo)}</div>'
+            f"{deuda_html or ''}"
+            f"{nota_vieja}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        if sugerencia:
+            _render_boton_abono(tarjeta, sugerencia, msg_key)
+        return
+
+    # Sin Past Due: brief del asesor (borde = color de la tarjeta del abanico)
     st.markdown(
-        f'<div class="ti-asesor-hoy {tono_cls}">'
+        f'<div class="ti-asesor-hoy" style="border-left:4px solid {borde};">'
         f'<div class="ti-asesor-saludo">{escape(brief.saludo)}</div>'
         f'<div class="ti-asesor-msg">{escape(brief.mensaje)}</div>'
         f"</div>",
         unsafe_allow_html=True,
     )
 
-
-def _render_notificaciones(tarjeta) -> None:
-    msg_key = f"banner_abono_ok_{tarjeta.id}"
-    if msg_key in st.session_state:
-        st.success(st.session_state.pop(msg_key))
-
-    sugerencia = calcular_sugerencia_abono(tarjeta)
-    notif = evaluar_notificaciones_tarjeta(tarjeta)
-
     if sugerencia:
-        principal, secundaria = _mensaje_sugerencia(sugerencia)
-        cuerpo = principal
-        if secundaria:
-            cuerpo = f"{principal}\n\n{secundaria}"
-        if notif and not notif.urgente:
-            cuerpo = f"{cuerpo}\n\n{notif.mensaje}"
-
-        if sugerencia.urgente:
-            _render_banner_alerta(cuerpo, "urgente")
-        elif sugerencia.escenario == "ciclo_pendiente":
-            _render_banner_alerta(cuerpo, "warn")
-        else:
-            _render_banner_alerta(cuerpo, "info")
-
-        st.caption(t("banner_sugerencia.aviso_no_banco"))
-        monto_btn = _dinero(sugerencia.monto)
-        etiqueta_boton = (
-            t("banner_sugerencia.boton_pago_total", monto=monto_btn)
-            if sugerencia.es_pago_total
-            else t("banner_sugerencia.boton_pago_parcial", monto=monto_btn)
-            if sugerencia.escenario == "ciclo_pendiente"
-            else t("banner_sugerencia.boton_abono", monto=monto_btn)
-        )
-        if st.button(
-            etiqueta_boton,
-            key=f"banner_abono_{tarjeta.id}",
-            type="primary",
-            use_container_width=True,
-        ):
-            confirmar_pago_en_banco(
-                tarjeta,
-                tipo="abono",
-                monto_txt=monto_btn,
-                monto=sugerencia.monto,
-                es_pago_total=sugerencia.es_pago_total,
-                escenario=sugerencia.escenario,
-                msg_key=msg_key,
+        # El brief ya habla del pago; solo botón + caption (sin segundo banner rojo)
+        if brief.tono not in ("urgente", "atencion") or sugerencia.escenario == "ciclo_abierto":
+            principal, secundaria = _mensaje_sugerencia(sugerencia)
+            cuerpo = principal
+            if secundaria:
+                cuerpo = f"{principal}\n\n{secundaria}"
+            if notif and not notif.urgente:
+                cuerpo = f"{cuerpo}\n\n{notif.mensaje}"
+            nivel = (
+                "urgente"
+                if sugerencia.urgente or sugerencia.escenario == "past_due"
+                else "warn"
+                if sugerencia.escenario == "ciclo_pendiente"
+                else "info"
             )
+            _render_banner_alerta(cuerpo, nivel)
+        _render_boton_abono(tarjeta, sugerencia, msg_key)
         return
 
-    if not notif:
+    if notif:
+        _render_banner_alerta(notif.mensaje, "urgente" if notif.urgente else "info")
+
+
+def _render_tip_estrategia(tarjetas, tarjeta_sel) -> None:
+    """
+    Tip Avalancha solo si aporta info NUEVA: otra tarjeta distinta a la del abanico.
+    """
+    if len(tarjetas) < 2:
         return
-    nivel = "urgente" if notif.urgente else "info"
-    _render_banner_alerta(notif.mensaje, nivel)
+    tip = recomendar_abono_extra(tarjetas, MONTO_EXTRA_DEFAULT)
+    if not tip:
+        return
+    if tip.tarjeta.id == tarjeta_sel.id:
+        return
+    st.markdown(f"**{t('estrategia.titulo')}**")
+    _render_banner_alerta(tip.mensaje, "urgente" if tip.urgente else "info")
 
 
 def _render_empty(on_navigate) -> None:
@@ -180,8 +218,6 @@ def _render_empty(on_navigate) -> None:
 def _render_with_cards(on_navigate, on_edit) -> None:
     tarjetas = listar_tarjetas()
 
-    _render_banner_emergencia_atraso(tarjetas)
-
     render_page_header(
         t("pantalla_inicio.titulo"),
         t("pantalla_lista_tarjetas.subtitulo_abanico"),
@@ -189,8 +225,11 @@ def _render_with_cards(on_navigate, on_edit) -> None:
 
     sel = render_abanico_global(tarjetas)
     tarjeta_sel = tarjetas[sel]
-    _render_brief_asesor(tarjeta_sel)
-    _render_notificaciones(tarjeta_sel)
+
+    # Un solo bloque de prioridad + botón (sin banners duplicados arriba)
+    _render_prioridad_unificada(tarjeta_sel)
+    # Tip solo si apunta a OTRA tarjeta
+    _render_tip_estrategia(tarjetas, tarjeta_sel)
 
     main_ids = ("mejor", "tarjetas", "guia", "config", "reportes")
     main_labels = {

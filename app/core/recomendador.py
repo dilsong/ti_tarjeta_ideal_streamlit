@@ -9,7 +9,7 @@ from datetime import date
 
 from app.core.ciclo import calcular_disponibilidad
 from app.core.fechas import hoy
-from app.core.salud_tarjeta import tiene_atraso
+from app.core.salud_tarjeta import fmt_dinero, tiene_atraso
 from app.core.tarjetas import Tarjeta
 from app.core.validacion_ciclo import (
     compra_cae_en_proximo_ciclo,
@@ -17,6 +17,20 @@ from app.core.validacion_ciclo import (
     validar_ciclo,
 )
 from app.i18n.translator import t
+
+
+def etiqueta_recomendada(tarjeta: Tarjeta) -> str:
+    """Identifica la tarjeta sin ambigüedad: banco + nombre + últimos 4."""
+    digitos = str(tarjeta.ultimos_digitos or "").strip() or "????"
+    nombre = (tarjeta.nombre or "").strip()
+    banco = (tarjeta.banco or "").strip()
+    if nombre and banco and nombre.lower() != banco.lower():
+        return f"{banco} {nombre} (•••• {digitos})"
+    if banco:
+        return f"{banco} (•••• {digitos})"
+    if nombre:
+        return f"{nombre} (•••• {digitos})"
+    return f"•••• {digitos}"
 
 
 @dataclass
@@ -128,7 +142,7 @@ def generar_mensaje_humano(
     ratio = disponible / tarjeta.limite if tarjeta.limite else 0
 
     partes = [
-        t("pantalla_recomendacion.mejor_tarjeta", nombre=tarjeta.nombre),
+        t("pantalla_recomendacion.mejor_tarjeta", nombre=etiqueta_recomendada(tarjeta)),
         t("pantalla_recomendacion.dias_pago", dias=eval_int.dias_pago),
     ]
 
@@ -169,19 +183,24 @@ def generar_frase_compra_corta(
     monto: float,
     referencia: date | None = None,
 ) -> str:
-    """Una sola frase humana para el momento de compra."""
+    """Una sola frase humana para el momento de compra. Nunca recomienda si hay atraso o no alcanza."""
     ref = referencia or hoy()
     if monto <= 0:
         return t("tabs.comprar_monto_invalido")
 
+    etiqueta = etiqueta_recomendada(tarjeta)
+
+    if tiene_atraso(tarjeta):
+        return t("asesor_compra.no_usar_atraso", nombre=etiqueta)
+
     disponible = calcular_disponibilidad(tarjeta, ref)
-    disp_txt = f"${disponible:,.2f}"
-    monto_txt = f"${monto:,.2f}"
+    disp_txt = fmt_dinero(disponible)
+    monto_txt = fmt_dinero(monto)
 
     if disponible < monto:
         return t(
             "asesor_compra.sin_disponible",
-            nombre=tarjeta.nombre,
+            nombre=etiqueta,
             disp=disp_txt,
             monto=monto_txt,
         )
@@ -192,20 +211,20 @@ def generar_frase_compra_corta(
     if eval_int.proximo_ciclo:
         return t(
             "asesor_compra.proximo_ciclo",
-            nombre=tarjeta.nombre,
+            nombre=etiqueta,
             dias=estado.dias_hasta_pago_siguiente_ciclo,
             disp=disp_txt,
         )
     if eval_int.dias_pago >= 14:
         return t(
             "asesor_compra.comoda",
-            nombre=tarjeta.nombre,
+            nombre=etiqueta,
             dias=eval_int.dias_pago,
             disp=disp_txt,
         )
     return t(
         "asesor_compra.cuidado",
-        nombre=tarjeta.nombre,
+        nombre=etiqueta,
         dias=eval_int.dias_pago,
         disp=disp_txt,
     )
@@ -227,7 +246,7 @@ def evaluar_tarjeta_abanico(
             tarjeta=tarjeta,
             pros=[],
             contras=[alerta],
-            resumen=t("pantalla_recomendacion.bloqueo_atraso_tarjeta", nombre=tarjeta.nombre),
+            resumen=t("pantalla_recomendacion.bloqueo_atraso_tarjeta", nombre=etiqueta_recomendada(tarjeta)),
             puede_comprar=False,
             score=-1.0,
         )
@@ -255,9 +274,15 @@ def evaluar_tarjeta_abanico(
     dias = dias_para_pagar_compra(tarjeta, ref)
 
     if puede_comprar:
-        pros.append(t("tabs.comprar_pro_disponible", monto=disponible))
+        pros.append(t("tabs.comprar_pro_disponible", monto=fmt_dinero(disponible)))
     else:
-        contras.append(t("tabs.comprar_contra_sin_disponible", monto=disponible, compra=monto))
+        contras.append(
+            t(
+                "tabs.comprar_contra_sin_disponible",
+                monto=fmt_dinero(disponible),
+                compra=fmt_dinero(monto),
+            )
+        )
 
     if eval_int.dias_pago >= 14:
         pros.append(t("tabs.comprar_pro_dias_pago", dias=eval_int.dias_pago))
@@ -295,15 +320,15 @@ def evaluar_tarjeta_abanico(
         contras.append(t("tabs.umbral_activo_min", monto=tarjeta.umbral_disponible_min))
 
     if eval_int.proximo_ciclo:
-        resumen = t("tabs.comprar_resumen_abanico_comoda", nombre=tarjeta.nombre, dias=estado.dias_hasta_pago_siguiente_ciclo)
+        resumen = t("tabs.comprar_resumen_abanico_comoda", nombre=etiqueta_recomendada(tarjeta), dias=estado.dias_hasta_pago_siguiente_ciclo)
     elif not puede_comprar:
-        resumen = t("tabs.comprar_resumen_abanico_riesgo", nombre=tarjeta.nombre)
+        resumen = t("tabs.comprar_resumen_abanico_riesgo", nombre=etiqueta_recomendada(tarjeta))
     elif len(contras) == 0 or (len(pros) >= len(contras) and not eval_int.genera_interes):
-        resumen = t("tabs.comprar_resumen_abanico_ok", nombre=tarjeta.nombre, dias=dias)
+        resumen = t("tabs.comprar_resumen_abanico_ok", nombre=etiqueta_recomendada(tarjeta), dias=dias)
     elif eval_int.genera_interes or eval_int.dias_pago <= 7:
-        resumen = t("tabs.comprar_resumen_abanico_cuidado", nombre=tarjeta.nombre, dias=dias)
+        resumen = t("tabs.comprar_resumen_abanico_cuidado", nombre=etiqueta_recomendada(tarjeta), dias=dias)
     else:
-        resumen = t("tabs.comprar_resumen_abanico_ok", nombre=tarjeta.nombre, dias=dias)
+        resumen = t("tabs.comprar_resumen_abanico_ok", nombre=etiqueta_recomendada(tarjeta), dias=dias)
 
     return EvaluacionEleccion(
         tarjeta=tarjeta,

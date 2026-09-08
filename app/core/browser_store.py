@@ -55,12 +55,22 @@ def _is_streamlit_cloud() -> bool:
     return os.path.isdir("/mount/src")
 
 
+def _is_render() -> bool:
+    """Render.com — disco efímero; conviene data por URL/dispositivo."""
+    return bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
+
+
 def use_browser_storage() -> bool:
     """True = data por dispositivo (piloto). False = app/data compartido (Lab)."""
-    if _is_streamlit_cloud():
-        return True
     flag = os.environ.get("TI_USE_FILESYSTEM", "").strip().lower()
-    return flag not in ("1", "true", "yes", "on")
+    if flag in ("1", "true", "yes", "on"):
+        return False
+    if flag in ("0", "false", "no", "off"):
+        return True
+    # Sin flag: Cloud / Render → URL; Lab local → filesystem si ya lo usas a mano.
+    if _is_streamlit_cloud() or _is_render():
+        return True
+    return True
 
 
 def empty_bundle() -> dict[str, Any]:

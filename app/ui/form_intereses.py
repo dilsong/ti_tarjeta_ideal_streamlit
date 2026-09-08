@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import streamlit as st
 
 from app.core.intereses import TASA_INTERES_DEFAULT, calcular_interes_diario
+from app.core.salud_tarjeta import fmt_dinero
 from app.core.tarjetas import Tarjeta
 from app.i18n.translator import t
 
@@ -92,10 +93,12 @@ def render_campos_intereses(
     if prefill:
         avisos: list[str] = []
         if prefill.get("pago_minimo") is not None:
-            avisos.append(t("intereses.pago_minimo_detectado", monto=float(prefill["pago_minimo"])))
+            avisos.append(
+                t("intereses.pago_minimo_detectado", monto=fmt_dinero(float(prefill["pago_minimo"])))
+            )
         if prefill.get("cargo_atraso") is not None:
             avisos.append(
-                t("intereses.cargo_atraso_detectado", monto=float(prefill["cargo_atraso"]))
+                t("intereses.cargo_atraso_detectado", monto=fmt_dinero(float(prefill["cargo_atraso"])))
             )
         if prefill.get("penalty_apr") is not None:
             avisos.append(t("intereses.tasa_mora_detectada", tasa=float(prefill["penalty_apr"])))
@@ -122,8 +125,8 @@ def render_campos_intereses(
     st.caption(
         t(
             "intereses.interes_diario_calc",
-            monto=diario,
-            saldo=saldo_ref,
+            monto=f"${diario:.4f}",
+            saldo=fmt_dinero(saldo_ref),
             tasa=tasa,
         )
     )

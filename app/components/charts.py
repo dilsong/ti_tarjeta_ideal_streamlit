@@ -15,6 +15,8 @@ import streamlit as st
 from app.components.theme import CARD_COLORS, ESTADO_COLORS, colores_mensaje_tarjeta
 from app.core.consumos import CONSUMO_SIN_DETALLE, listar_consumos_por_tarjeta
 from app.core.fechas import dias_entre, fecha_en_mes, formatear_fecha, hoy, proxima_fecha_por_dia
+from app.components.caja_alerta import html_cuadro_deuda_clara
+from app.core.salud_tarjeta import evaluar_prioridad_pago, tiene_atraso
 from app.core.tarjetas import Tarjeta
 from app.core.validacion_ciclo import ejecutar_prueba_escenario, ultimo_corte, validar_ciclo
 from app.i18n.translator import get_language, t
@@ -622,9 +624,15 @@ def render_grafico_fechas(tarjeta: Tarjeta) -> None:
     pago_vencido_cerrado = proxima_fecha_por_dia(tarjeta.dia_pago, fecha_inicio)
     dias_atraso = max(0, dias_entre(pago_vencido_cerrado, ref)) if ref > pago_vencido_cerrado and deuda_ciclo > 0 else 0
 
-    msg, _ = _mensaje_fechas(ref, fecha_corte, fecha_pago_obligacion, dias_pago, dias_corte, idioma)
-    severidad = _severidad_mensaje_fechas(dias_pago, dias_atraso, deuda_ciclo)
-    _render_mensaje_fechas_caja(tarjeta, msg, severidad)
+    if tiene_atraso(tarjeta):
+        html = html_cuadro_deuda_clara(tarjeta, idioma)
+        if html:
+            st.markdown(html, unsafe_allow_html=True)
+        dias_atraso = evaluar_prioridad_pago(tarjeta, ref).dias_atraso_mora
+    else:
+        msg, _ = _mensaje_fechas(ref, fecha_corte, fecha_pago_obligacion, dias_pago, dias_corte, idioma)
+        severidad = _severidad_mensaje_fechas(dias_pago, dias_atraso, deuda_ciclo)
+        _render_mensaje_fechas_caja(tarjeta, msg, severidad)
 
     if deuda_ciclo > 0:
         _timeline_ciclo_cerrado(tarjeta, ref, idioma, deuda_ciclo)

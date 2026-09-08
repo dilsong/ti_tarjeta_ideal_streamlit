@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.fechas import hoy
+from app.core.salud_tarjeta import evaluar_prioridad_pago, tiene_atraso
 from app.core.tarjetas import EstadoSalud, Tarjeta, guardar_tarjeta, obtener_tarjeta
 from app.core.validacion_ciclo import estado_riesgo_pago, validar_ciclo_con_intereses
 
@@ -233,9 +234,25 @@ def _factor_tiempo(dias: int) -> float:
 def calcular_sugerencia_abono(tarjeta: Tarjeta) -> SugerenciaAbono | None:
     """Monto y contexto para el banner de abono inteligente."""
     estado = validar_ciclo_con_intereses(tarjeta)
-    deuda = estado.monto_adeudado_ciclo_anterior
     consumos = estado.consumos_ciclo_actual
     riesgo = estado_riesgo_pago(tarjeta)
+
+    if tiene_atraso(tarjeta):
+        prio = evaluar_prioridad_pago(tarjeta)
+        return SugerenciaAbono(
+            escenario="past_due",
+            monto=prio.monto_urgente,
+            usa_historial=False,
+            urgente=True,
+            es_pago_total=False,
+            deuda_ciclo=prio.monto_ciclo,
+            consumos_ciclo=consumos,
+            dias_restantes=prio.dias_atraso_mora,
+            foto_antes=prio.monto_urgente,
+            foto_despues=0.0,
+        )
+
+    deuda = estado.monto_adeudado_ciclo_anterior
 
     if deuda > 0:
         escenario = "ciclo_pendiente"

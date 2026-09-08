@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from app.core.ciclo import sincronizar_ciclo
 from app.core.consumos import CONSUMO_SIN_DETALLE, listar_consumos_por_tarjeta
 from app.core.fechas import dias_entre, fecha_en_mes, hoy, proxima_fecha_por_dia
+from app.core.salud_tarjeta import deuda_ciclo_estado, tiene_atraso
 from app.core.tarjetas import EstadoSalud, Tarjeta
 
 if TYPE_CHECKING:
@@ -107,7 +108,9 @@ def validar_ciclo(tarjeta: Tarjeta, referencia: date | None = None) -> EstadoCic
     ref = referencia or hoy()
     sincronizada = sincronizar_ciclo(tarjeta, ref)
 
-    deuda_ciclo = sincronizada.adeudado_ciclo
+    deuda_ciclo = deuda_ciclo_estado(sincronizada)
+    if deuda_ciclo <= 0:
+        deuda_ciclo = sincronizada.adeudado_ciclo
     adeudado_actual = sincronizada.adeudado
     ultimo = ultimo_corte(sincronizada, ref)
 
@@ -155,6 +158,8 @@ def estado_riesgo_pago(tarjeta: Tarjeta, referencia: date | None = None) -> Esta
     - Rojo: con deuda y 3 días o menos.
     """
     estado = validar_ciclo(tarjeta, referencia)
+    if tiene_atraso(tarjeta):
+        return EstadoSalud.NEGATIVO
     if estado.monto_adeudado_ciclo_anterior <= 0:
         return EstadoSalud.POSITIVO
     if estado.dias_hasta_pago <= 3:

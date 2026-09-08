@@ -16,7 +16,7 @@ from app.core.recomendador import (
     generar_mensaje_humano,
     recomendar_tarjeta,
 )
-from app.core.seguridad import crear_pin, pin_configurado, verificar_pin
+from app.core.seguridad import crear_pin, pin_configurado, pin_valido, verificar_pin
 from app.core.tarjetas import Tarjeta, guardar_tarjeta, listar_tarjetas
 
 __all__ = [
@@ -35,6 +35,7 @@ __all__ = [
     "guardar_tarjeta",
     "listar_tarjetas",
     "pin_configurado",
+    "pin_valido",
     "recomendar_tarjeta",
     "sincronizar_ciclo",
     "verificar_pin",

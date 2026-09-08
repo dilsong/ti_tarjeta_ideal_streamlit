@@ -14,12 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from app.core.fechas import dias_entre, formatear_fecha, hoy, proxima_fecha_por_dia
+from app.core.salud_tarjeta import fmt_dinero
 from app.core.tarjetas import Tarjeta, listar_tarjetas
 from app.core.validacion_ciclo import ultimo_corte, validar_ciclo
+from app.i18n.translator import get_language, t
 
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 _CONFIG_FILE = _CONFIG_DIR / "notificaciones_usuario.json"
-_PREFIJO = "TI Asesor Financiero:"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "notificar_dia_corte": True,
@@ -60,12 +61,11 @@ class NotificacionCiclo:
     fecha_evento: str = ""
 
 
-def _fmt_monto(monto: float) -> str:
-    return f"${monto:,.2f}"
-
-
 def _mensaje(cuerpo: str, tarjeta_nombre: str = "") -> str:
-    encabezado = f"{_PREFIJO} {tarjeta_nombre}" if tarjeta_nombre else _PREFIJO
+    if tarjeta_nombre:
+        encabezado = t("alertas_ciclo.encabezado_tarjeta", tarjeta=tarjeta_nombre)
+    else:
+        encabezado = t("alertas_ciclo.encabezado")
     return f"{encabezado}\n{cuerpo}"
 
 
@@ -180,6 +180,7 @@ def procesar_notificaciones(
     dias_desde_corte = dias_entre(inicio, fecha_actual)
     dias_despues_pago = dias_entre(fecha_pago, fecha_actual) if fecha_actual > fecha_pago else 0
     resultado: list[NotificacionCiclo] = []
+    lang = get_language()
 
     dias_antes_corte = int(usuario_config.get("dias_antes_corte", 3))
     if (
@@ -187,15 +188,18 @@ def procesar_notificaciones(
         and fecha_actual < fecha_corte
         and dias_hasta_corte == dias_antes_corte
     ):
-        corte_txt = formatear_fecha(fecha_corte)
-        pago_txt = formatear_fecha(fecha_pago)
+        corte_txt = formatear_fecha(fecha_corte, lang)
+        pago_txt = formatear_fecha(fecha_pago, lang)
         resultado.append(
             _notif(
                 "antes_corte",
-                f"Tu corte es en {dias_antes_corte} días ({corte_txt}).\n"
-                f"Monto actual del ciclo: {_fmt_monto(total)}.\n"
-                f"Después del corte tendrás hasta el {pago_txt} para pagar.\n"
-                "Compras posteriores al corte entrarán al siguiente periodo.",
+                t(
+                    "alertas_ciclo.antes_corte",
+                    dias=dias_antes_corte,
+                    corte=corte_txt,
+                    total=fmt_dinero(total),
+                    pago=pago_txt,
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_corte.isoformat(),
@@ -205,14 +209,14 @@ def procesar_notificaciones(
         )
 
     if usuario_config.get("notificar_dia_corte") and fecha_actual == fecha_corte:
-        dias_para_pagar = max(0, dias_entre(fecha_actual, fecha_pago))
         resultado.append(
             _notif(
                 "corte",
-                f"Tu ciclo se ha cerrado.\n"
-                f"Monto a pagar: {_fmt_monto(monto_pendiente)}.\n"
-                f"Tienes {dias_para_pagar} días para pagarlo.\n"
-                "Para más detalles consulta TI Asesor Financiero.",
+                t(
+                    "alertas_ciclo.corte",
+                    monto=fmt_dinero(monto_pendiente),
+                    dias=max(0, dias_entre(fecha_actual, fecha_pago)),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_corte.isoformat(),
@@ -228,9 +232,12 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "mitad_ciclo",
-                f"Llevas {dias_desde_corte} días del ciclo.\n"
-                f"Tu pago vence en {max(0, dias_hasta_pago)} días.\n"
-                f"Monto pendiente: {_fmt_monto(monto_pendiente)}.",
+                t(
+                    "alertas_ciclo.mitad_ciclo",
+                    dias=dias_desde_corte,
+                    dias_pago=max(0, dias_hasta_pago),
+                    monto=fmt_dinero(monto_pendiente),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_corte.isoformat(),
@@ -248,9 +255,11 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "antes_pago",
-                f"Tu pago vence en {dias_antes} días.\n"
-                f"Monto pendiente: {_fmt_monto(monto_pendiente)}.\n"
-                "Evita intereses adicionales.",
+                t(
+                    "alertas_ciclo.antes_pago",
+                    dias=dias_antes,
+                    monto=fmt_dinero(monto_pendiente),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_pago.isoformat(),
@@ -263,9 +272,7 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "dia_pago",
-                f"Hoy vence tu pago.\n"
-                f"Monto pendiente: {_fmt_monto(monto_pendiente)}.\n"
-                "Pagar a tiempo te mantiene en verde.",
+                t("alertas_ciclo.dia_pago", monto=fmt_dinero(monto_pendiente)),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_pago.isoformat(),
@@ -282,9 +289,11 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "despues_pago",
-                "Tu ciclo entró en días de interés.\n"
-                f"Día {dias_despues_pago} después del pago.\n"
-                f"Monto pendiente: {_fmt_monto(monto_ciclo_anterior)}.",
+                t(
+                    "alertas_ciclo.despues_pago",
+                    dias=dias_despues_pago,
+                    monto=fmt_dinero(monto_ciclo_anterior),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_pago.isoformat(),
@@ -302,9 +311,10 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "despues_corte",
-                "Tu ciclo anterior sigue pendiente.\n"
-                f"Monto a pagar: {_fmt_monto(monto_ciclo_anterior)}.\n"
-                "Consulta TI Asesor Financiero para más detalles.",
+                t(
+                    "alertas_ciclo.despues_corte",
+                    monto=fmt_dinero(monto_ciclo_anterior),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=inicio.isoformat(),
@@ -321,9 +331,10 @@ def procesar_notificaciones(
         resultado.append(
             _notif(
                 "inicio_ciclo",
-                "Tu nuevo ciclo comenzó.\n"
-                f"El próximo corte es el {fecha_corte.strftime('%d/%m/%Y')}.\n"
-                "Las compras de hoy en adelante suman al periodo actual.",
+                t(
+                    "alertas_ciclo.inicio_ciclo",
+                    corte=formatear_fecha(fecha_corte, lang),
+                ),
                 tarjeta_id=tarjeta_id,
                 tarjeta_nombre=tarjeta_nombre,
                 ciclo_ref=fecha_corte.isoformat(),

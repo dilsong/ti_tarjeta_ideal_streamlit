@@ -8,7 +8,7 @@ from typing import Iterator
 import streamlit as st
 
 from app.components.theme import MOBILE_CSS
-from app.core.seguridad import crear_pin, get_idioma, pin_configurado, set_idioma, verificar_pin
+from app.core.seguridad import crear_pin, get_idioma, pin_configurado, pin_valido, set_idioma, verificar_pin
 from app.i18n.translator import get_language, init_translator, set_language, t
 
 TARJETA_SEL_KEY = "tarjeta_sel_idx"
@@ -36,24 +36,102 @@ def fila_accion(main_ratio: int = 8, btn_ratio: int = 1) -> Iterator[tuple]:
     yield c_main, c_btn
 
 
+_MANIFEST_HREF = "/app/static/manifest.json"
+# Streamlit static serving: ./static → /app/static/...
+_ICON_HREF = "/app/static/icon.png"
+_PAGE_ICON = "static/icon.png"
+_THEME_COLOR = "#2563EB"
+
+
+def _inject_pwa_head() -> None:
+    """
+    Inyecta manifest + metas PWA en el <head> de la ventana principal.
+    Streamlit corre en iframe: st.markdown solo afecta el body del iframe;
+    Safari/Chrome necesitan las etiquetas en el documento padre para «Añadir a inicio».
+    """
+    import streamlit.components.v1 as components
+
+    if st.session_state.get("ti_pwa_head_ok"):
+        return
+
+    # Fallback visible en el iframe (algunos navegadores lo leen igual)
+    st.markdown(
+        f'<link rel="manifest" href="{_MANIFEST_HREF}">'
+        f'<link rel="apple-touch-icon" href="{_ICON_HREF}">'
+        f'<meta name="theme-color" content="{_THEME_COLOR}">'
+        f'<meta name="mobile-web-app-capable" content="yes">'
+        f'<meta name="apple-mobile-web-app-capable" content="yes">'
+        f'<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+        f'<meta name="apple-mobile-web-app-title" content="TI">',
+        unsafe_allow_html=True,
+    )
+
+    components.html(
+        f"""
+        <script>
+        (function () {{
+          try {{
+            const doc = (window.parent && window.parent.document) || document;
+            const head = doc.head || doc.getElementsByTagName("head")[0];
+            if (!head) return;
+            function upsert(sel, tag, attrs) {{
+              let el = head.querySelector(sel);
+              if (!el) {{
+                el = doc.createElement(tag);
+                head.appendChild(el);
+              }}
+              Object.keys(attrs).forEach(function (k) {{ el.setAttribute(k, attrs[k]); }});
+            }}
+            upsert('link[rel="manifest"]', "link", {{
+              rel: "manifest",
+              href: "{_MANIFEST_HREF}"
+            }});
+            upsert('link[rel="apple-touch-icon"]', "link", {{
+              rel: "apple-touch-icon",
+              href: "{_ICON_HREF}"
+            }});
+            upsert('meta[name="theme-color"]', "meta", {{
+              name: "theme-color",
+              content: "{_THEME_COLOR}"
+            }});
+            upsert('meta[name="mobile-web-app-capable"]', "meta", {{
+              name: "mobile-web-app-capable",
+              content: "yes"
+            }});
+            upsert('meta[name="apple-mobile-web-app-capable"]', "meta", {{
+              name: "apple-mobile-web-app-capable",
+              content: "yes"
+            }});
+            upsert('meta[name="apple-mobile-web-app-status-bar-style"]', "meta", {{
+              name: "apple-mobile-web-app-status-bar-style",
+              content: "black-translucent"
+            }});
+            upsert('meta[name="apple-mobile-web-app-title"]', "meta", {{
+              name: "apple-mobile-web-app-title",
+              content: "TI"
+            }});
+          }} catch (e) {{
+            console.warn("TI PWA head inject failed", e);
+          }}
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+    st.session_state["ti_pwa_head_ok"] = True
+
+
 def setup_page(title: str | None = None) -> None:
-    """Configura página con estilo móvil."""
+    """Configura página con estilo móvil + PWA instalable."""
     init_i18n()
     st.set_page_config(
-        page_title=title or t("app.nombre"),
-        page_icon="💳",
+        page_title=title or "TI App",
+        page_icon=_PAGE_ICON,
         layout="centered",
         initial_sidebar_state="collapsed",
     )
     st.markdown(MOBILE_CSS, unsafe_allow_html=True)
-    st.markdown(
-        '<link rel="manifest" href="/static/manifest.webmanifest">'
-        '<meta name="theme-color" content="#2563EB">'
-        '<meta name="mobile-web-app-capable" content="yes">'
-        '<meta name="apple-mobile-web-app-capable" content="yes">'
-        '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">',
-        unsafe_allow_html=True,
-    )
+    _inject_pwa_head()
 
 
 def init_i18n() -> None:
@@ -337,18 +415,36 @@ def card_html(tarjeta, front: bool = False) -> str:
 
 
 def pin_input(label: str, key: str) -> str:
-    """PIN de 4 dígitos con teclado nativo del dispositivo."""
+    """PIN de 4 a 6 dígitos con teclado nativo del dispositivo."""
     return st.text_input(
         label,
         key=key,
-        max_chars=4,
+        max_chars=6,
         type="password",
         help=t("pantalla_pin.pin"),
     )
 
 
+def render_licencia_expirada() -> None:
+    """Pantalla de bloqueo total cuando la prueba terminó."""
+    from app.core.licencia import fecha_expiracion_licencia
+
+    c_sp, c_lang = st.columns([4, 1])
+    with c_lang:
+        language_selector(aligned=True)
+    with c_sp:
+        st.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
+
+    st.title("🔒 " + t("licencia.titulo"))
+    st.error(t("licencia.mensaje"))
+    st.info(
+        t("licencia.detalle").format(fecha=fecha_expiracion_licencia().isoformat())
+    )
+    st.caption(t("licencia.contacto"))
+
+
 def render_pin_gate(on_unlock) -> None:
-    """Pantalla de crear PIN (primera vez) o desbloquear."""
+    """Pantalla de crear PIN (primera vez) o desbloquear. Bloquea toda la UI."""
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)
@@ -370,7 +466,7 @@ def _render_crear_pin(on_unlock) -> None:
     if step == "pin":
         pin = pin_input(t("pantalla_pin.pin"), "crear_pin")
         if st.button(t("common.continuar"), key="pin_next", type="primary", use_container_width=True):
-            if len(pin) != 4 or not pin.isdigit():
+            if not pin_valido(pin):
                 error.error(t("pantalla_pin.error_pin_corto"))
             else:
                 st.session_state["pin_temp"] = pin

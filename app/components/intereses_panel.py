@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.components.caja_alerta import render_cuadro_deuda_clara
 from app.components.desglose_dialog import boton_desglose
 from app.core.intereses import generar_desglose_proximo_ciclo
 from app.core.tarjetas import Tarjeta
+from app.core.salud_tarjeta import tiene_atraso
 from app.core.validacion_ciclo import validar_ciclo_con_intereses
 from app.i18n.translator import t
 from app.ui.helpers import fila_accion
@@ -71,6 +73,9 @@ def render_panel_intereses(tarjeta: Tarjeta, *, key_prefix: str = "") -> None:
     if tarjeta.tasa_es_estimada:
         _aviso_tasa_estimada(proy.tasa_aplicada, tarjeta.banco)
 
+    if tiene_atraso(tarjeta):
+        render_cuadro_deuda_clara(tarjeta)
+
     desglose_prox = generar_desglose_proximo_ciclo(tarjeta, estado, proy)
 
     _monto_grande(t("intereses.monto_pagar_ciclo"), proy.monto_pagar_ciclo)
@@ -80,7 +85,7 @@ def render_panel_intereses(tarjeta: Tarjeta, *, key_prefix: str = "") -> None:
         proy.monto_acumulado_proximo_min,
         desglose_prox,
         f"{key_prefix}desglose_prox_{tarjeta.id}",
-        hint=t("intereses.monto_proximo_hint"),
+        hint=t("intereses.monto_proximo_hint", minimo=f"${proy.pago_minimo:,.2f}"),
     )
 
     if proy.monto_pagar_ciclo <= 0:

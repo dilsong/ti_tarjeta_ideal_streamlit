@@ -1,0 +1,25 @@
+# Render Blueprint — TI App (Streamlit PWA monousuario / prueba)
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: ti-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      streamlit run streamlit_app.py
+      --server.port=$PORT
+      --server.address=0.0.0.0
+      --server.headless=true
+      --browser.gatherUsageStats=false
+    healthCheckPath: /
+    envVars:
+      # Monousuario Lab en disco (requiere disco persistente en planes de pago).
+      # En free/efímero usa "0" para persistir en la URL (?ti=&s=).
+      - key: TI_USE_FILESYSTEM
+        value: "0"
+      # Fin de la prueba (ISO). Tras esta fecha la app muestra bloqueo de licencia.
+      - key: FECHA_EXPIRACION_LICENCIA
+        value: "2026-10-08"
+      - key: PYTHON_VERSION
+        value: "3.11.9"

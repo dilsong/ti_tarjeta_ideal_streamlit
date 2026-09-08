@@ -1,27 +1,32 @@
 """
-Bloque OCR al registrar tarjeta: captura → texto → rellenar formulario.
+OCR al registrar o editar tarjeta: captura → texto → rellenar formulario.
 La foto es la vía preferida; pegar texto es respaldo.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import BytesIO
 
 import streamlit as st
 from PIL import Image
 
+from app.components.select_with_add import init_select_with_add
+from app.components.theme import BANCOS_DEFAULT
 from app.core.ocr_captura import DatosCaptura, ocr_disponible, procesar_imagen_y_texto
+from app.core.salud_tarjeta import fmt_dinero
 from app.i18n.translator import t
 from app.ui.form_intereses import aplicar_prefill_a_widgets, limpiar_widgets_intereses
 
+PREFIX_REG = "reg"
+PREFIX_EDIT = "edit"
 
-_SESSION_OCR = "reg_ocr_datos"
-SESSION_OCR_DATOS = _SESSION_OCR
-_SESSION_OCR_TEXTO = "reg_ocr_texto_visto"
-SESSION_PREFILL = "reg_ocr_prefill"
+NOMBRES_TARJETA_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
 
-# Campos del formulario de registro que deben quedar vacíos al empezar de cero.
-_CLAVES_FORM = (
+SESSION_OCR_DATOS = f"{PREFIX_REG}_ocr_datos"
+SESSION_PREFILL = f"{PREFIX_REG}_ocr_prefill"
+
+_CLAVES_FORM_REG = (
     "limite",
     "adeudado",
     "digitos",
@@ -33,7 +38,10 @@ _CLAVES_FORM = (
     "swa_sel_nombre_tarjeta",
     "swa_custom_nombre_tarjeta",
 )
-_CLAVES_OCR = (_SESSION_OCR, _SESSION_OCR_TEXTO, SESSION_PREFILL, "reg_ocr_manual")
+
+
+def _k(prefix: str, name: str) -> str:
+    return f"{prefix}_ocr_{name}"
 
 
 def _borrar(*claves: str) -> None:
@@ -44,52 +52,37 @@ def _borrar(*claves: str) -> None:
             pass
 
 
-def datos_ocr_pendientes() -> DatosCaptura | None:
-    """Datos OCR del último análisis (para persistir al guardar la tarjeta)."""
-    raw = st.session_state.get(_SESSION_OCR)
+def datos_ocr_pendientes(prefix: str = PREFIX_REG) -> DatosCaptura | None:
+    """Datos OCR del último análisis (para persistir al guardar)."""
+    raw = st.session_state.get(_k(prefix, "datos"))
     if not raw:
         return None
     return DatosCaptura.from_dict(raw)
 
 
 def limpiar_formulario_registro() -> None:
-    """Deja el formulario y el análisis en blanco (nueva tarjeta desde cero)."""
-    _borrar(*_CLAVES_FORM, *_CLAVES_OCR)
-    limpiar_widgets_intereses("reg")
+    """Deja el formulario de registro y el análisis en blanco."""
+    _borrar(
+        *_CLAVES_FORM_REG,
+        _k(PREFIX_REG, "datos"),
+        _k(PREFIX_REG, "texto_visto"),
+        _k(PREFIX_REG, "prefill"),
+        _k(PREFIX_REG, "manual"),
+    )
+    limpiar_widgets_intereses(PREFIX_REG)
 
 
-def _aplicar_a_formulario(datos: DatosCaptura) -> None:
-    """Rellena el formulario y borra valores viejos (p. ej. $2000 fantasma)."""
-    limite = datos.limite
-    saldo = datos.saldo
-    if limite is not None and saldo is not None and saldo > limite:
-        limite, saldo = saldo, limite
+def limpiar_ocr_analisis(prefix: str) -> None:
+    """Descarta solo el análisis OCR (no borra el formulario)."""
+    _borrar(
+        _k(prefix, "datos"),
+        _k(prefix, "texto_visto"),
+        _k(prefix, "prefill"),
+        _k(prefix, "manual"),
+    )
 
-    # Siempre sobrescribir estos campos al aplicar OCR (evita $2000 / fechas viejas)
-    st.session_state["limite"] = f"{limite:.2f}" if limite is not None else ""
-    st.session_state["adeudado"] = f"{saldo:.2f}" if saldo is not None else ""
-    st.session_state["digitos"] = datos.ultimos_digitos or ""
-    st.session_state["corte"] = str(int(datos.dia_corte)) if datos.dia_corte is not None else ""
-    st.session_state["pago"] = str(int(datos.dia_pago)) if datos.dia_pago is not None else ""
 
-    if datos.nombre_tarjeta:
-        st.session_state["swa_sel_nombre_tarjeta"] = datos.nombre_tarjeta
-
-    # Intereses / pago mínimo / cargo: escribir directo en las claves de los widgets
-    # (Streamlit ignora value= si la key ya existe; por eso hay que setear session_state).
-    prefill: dict[str, float] = {}
-    if datos.pago_minimo is not None:
-        prefill["pago_minimo"] = float(datos.pago_minimo)
-    if datos.apr is not None:
-        prefill["apr"] = float(datos.apr)
-    if datos.penalty_apr is not None:
-        prefill["penalty_apr"] = float(datos.penalty_apr)
-    if datos.late_fee is not None:
-        prefill["cargo_atraso"] = float(datos.late_fee)
-    st.session_state[SESSION_PREFILL] = prefill
-    aplicar_prefill_a_widgets("reg", prefill)
-
-    texto = (datos.texto_crudo or "").lower()
+def sugerir_banco_en_select(select_key: str, texto: str) -> None:
     sugeridos = [
         ("credit one", "Credit One"),
         ("capital one", "Capital One"),
@@ -106,10 +99,73 @@ def _aplicar_a_formulario(datos: DatosCaptura) -> None:
         ("citi", "Citi"),
         ("hsbc", "HSBC"),
     ]
+    texto_l = texto.lower()
     for needle, banco in sugeridos:
-        if needle in texto:
-            st.session_state["swa_sel_banco"] = banco
+        if needle in texto_l:
+            init_select_with_add(select_key, "bancos", BANCOS_DEFAULT, banco, force=True)
             break
+
+
+def _aplicar_a_formulario(
+    datos: DatosCaptura,
+    *,
+    prefix: str,
+    widget_prefix: str,
+    limite_key: str,
+    adeudado_key: str,
+    digitos_key: str,
+    corte_key: str,
+    pago_key: str,
+    select_key_banco: str,
+    select_key_nombre: str,
+    extra: Callable[[DatosCaptura], None] | None = None,
+) -> None:
+    limite = datos.limite
+    saldo = datos.saldo
+    if limite is not None and saldo is not None and saldo > limite:
+        limite, saldo = saldo, limite
+
+    st.session_state[limite_key] = f"{limite:.2f}" if limite is not None else ""
+    st.session_state[adeudado_key] = f"{saldo:.2f}" if saldo is not None else ""
+    st.session_state[digitos_key] = datos.ultimos_digitos or ""
+    st.session_state[corte_key] = str(int(datos.dia_corte)) if datos.dia_corte is not None else ""
+    st.session_state[pago_key] = str(int(datos.dia_pago)) if datos.dia_pago is not None else ""
+
+    if datos.nombre_tarjeta:
+        init_select_with_add(
+            select_key_nombre,
+            "nombres_tarjeta",
+            NOMBRES_TARJETA_DEFAULT,
+            datos.nombre_tarjeta,
+            force=True,
+        )
+
+    prefill: dict[str, float] = {}
+    if datos.pago_minimo is not None:
+        prefill["pago_minimo"] = float(datos.pago_minimo)
+    if datos.apr is not None:
+        prefill["apr"] = float(datos.apr)
+    if datos.penalty_apr is not None:
+        prefill["penalty_apr"] = float(datos.penalty_apr)
+    if datos.late_fee is not None:
+        prefill["cargo_atraso"] = float(datos.late_fee)
+    st.session_state[_k(prefix, "prefill")] = prefill
+    aplicar_prefill_a_widgets(widget_prefix, prefill)
+
+    if datos.texto_crudo:
+        sugerir_banco_en_select(select_key_banco, datos.texto_crudo)
+
+    if extra:
+        extra(datos)
+
+
+def _aplicar_extra_edit(datos: DatosCaptura) -> None:
+    if datos.monto_vencido_atrasado is not None:
+        st.session_state["edit_past_due"] = f"{max(0.0, float(datos.monto_vencido_atrasado)):.2f}"
+    if datos.pago_sin_intereses is not None:
+        st.session_state["edit_pago_sin_intereses"] = f"{float(datos.pago_sin_intereses):.2f}"
+    elif datos.saldo is not None:
+        st.session_state["edit_pago_sin_intereses"] = f"{float(datos.saldo):.2f}"
 
 
 def _mostrar_resumen(datos: DatosCaptura) -> None:
@@ -134,11 +190,14 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
         filas.append(
             f"- **🚨 {t('salud_tarjeta.monto_vencido')}:** ${datos.monto_vencido_atrasado:,.2f}"
         )
-        st.error(
+        from app.components.caja_alerta import render_caja_alerta
+
+        render_caja_alerta(
             t(
                 "salud_tarjeta.alerta_ocr_detectado",
-                monto=float(datos.monto_vencido_atrasado),
-            )
+                monto=fmt_dinero(float(datos.monto_vencido_atrasado)),
+            ),
+            "urgente",
         )
     if datos.late_fee is not None:
         filas.append(
@@ -154,7 +213,7 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
             f"- **{t('pantalla_registrar_tarjeta.ultimos_digitos')}:** {datos.ultimos_digitos}"
         )
     if datos.apr is not None:
-        filas.append(f"- **APR / tasa anual:** {datos.apr:.2f}%")
+        filas.append(f"- **{t('intereses.tasa_anual')}:** {datos.apr:.2f}%")
     if not filas:
         st.warning(t("pantalla_registrar_tarjeta.ocr_sin_campos"))
         return
@@ -171,7 +230,7 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
             (datos.pago_minimo, t("intereses.pago_minimo")),
             (datos.pago_sin_intereses, t("salud_tarjeta.pago_sin_intereses")),
             (datos.late_fee, t("intereses.cargo_atraso_corto")),
-            (datos.apr, "APR"),
+            (datos.apr, t("intereses.tasa_anual")),
         )
         if valor is None
     ]
@@ -181,8 +240,17 @@ def _mostrar_resumen(datos: DatosCaptura) -> None:
         )
 
 
-def render_ocr_para_registro() -> None:
-    with st.expander(t("pantalla_registrar_tarjeta.ocr_titulo"), expanded=True):
+def _render_ocr_formulario(
+    *,
+    prefix: str,
+    titulo_key: str,
+    limpiar_callback: Callable[[], None],
+    limpiar_label_key: str,
+    limpiar_help_key: str,
+    aplicar_kwargs: dict,
+    expanded: bool = True,
+) -> None:
+    with st.expander(t(titulo_key), expanded=expanded):
         hay_ocr = ocr_disponible()
         captura = None
 
@@ -191,7 +259,7 @@ def render_ocr_para_registro() -> None:
             captura = st.file_uploader(
                 t("pantalla_registrar_tarjeta.ocr_uploader"),
                 type=["png", "jpg", "jpeg", "webp"],
-                key="reg_ocr_upload",
+                key=_k(prefix, "upload"),
             )
             if captura:
                 try:
@@ -201,7 +269,7 @@ def render_ocr_para_registro() -> None:
             texto_manual = st.text_area(
                 t("pantalla_registrar_tarjeta.ocr_texto_manual"),
                 height=100,
-                key="reg_ocr_manual",
+                key=_k(prefix, "manual"),
                 placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
             )
         else:
@@ -209,7 +277,7 @@ def render_ocr_para_registro() -> None:
             texto_manual = st.text_area(
                 t("pantalla_registrar_tarjeta.ocr_texto_manual_solo"),
                 height=120,
-                key="reg_ocr_manual",
+                key=_k(prefix, "manual"),
                 placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
             )
 
@@ -220,20 +288,19 @@ def render_ocr_para_registro() -> None:
             type="primary",
             use_container_width=True,
             disabled=not puede,
-            key="reg_ocr_analizar",
+            key=_k(prefix, "analizar"),
         )
         if c_limpiar.button(
-            t("pantalla_registrar_tarjeta.limpiar_formulario"),
+            t(limpiar_label_key),
             use_container_width=True,
-            key="reg_ocr_limpiar",
-            help=t("pantalla_registrar_tarjeta.limpiar_formulario_ayuda"),
+            key=_k(prefix, "limpiar"),
+            help=t(limpiar_help_key),
         ):
-            limpiar_formulario_registro()
+            limpiar_callback()
             st.rerun()
 
         if analizar:
-            # Análisis nuevo: descartar el resultado anterior para no mezclar datos.
-            _borrar(_SESSION_OCR, _SESSION_OCR_TEXTO, SESSION_PREFILL)
+            _borrar(_k(prefix, "datos"), _k(prefix, "texto_visto"), _k(prefix, "prefill"))
             imagen = None
             if captura:
                 try:
@@ -241,8 +308,8 @@ def render_ocr_para_registro() -> None:
                 except Exception:
                     imagen = None
             datos = procesar_imagen_y_texto(imagen, texto_manual or "")
-            st.session_state[_SESSION_OCR] = datos.to_dict()
-            st.session_state[_SESSION_OCR_TEXTO] = datos.texto_crudo
+            st.session_state[_k(prefix, "datos")] = datos.to_dict()
+            st.session_state[_k(prefix, "texto_visto")] = datos.texto_crudo
             if captura and not hay_ocr and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.texto_crudo.strip():
@@ -252,12 +319,12 @@ def render_ocr_para_registro() -> None:
                 if datos.texto_crudo.strip():
                     st.info(t("pantalla_registrar_tarjeta.ocr_texto_sin_campos_hint"))
 
-        raw = st.session_state.get(_SESSION_OCR)
+        raw = st.session_state.get(_k(prefix, "datos"))
         if raw:
             datos = DatosCaptura.from_dict(raw)
             st.markdown(f"**{t('pantalla_registrar_tarjeta.ocr_resultado')}**")
             _mostrar_resumen(datos)
-            texto = st.session_state.get(_SESSION_OCR_TEXTO) or datos.texto_crudo
+            texto = st.session_state.get(_k(prefix, "texto_visto")) or datos.texto_crudo
             if texto:
                 with st.expander(
                     t("pantalla_registrar_tarjeta.ocr_ver_texto"),
@@ -268,9 +335,53 @@ def render_ocr_para_registro() -> None:
                 t("pantalla_registrar_tarjeta.ocr_usar"),
                 type="primary",
                 use_container_width=True,
-                key="reg_ocr_usar",
+                key=_k(prefix, "usar"),
                 disabled=not datos.tiene_datos_tarjeta(),
             ):
-                _aplicar_a_formulario(datos)
+                _aplicar_a_formulario(datos, **aplicar_kwargs)
                 st.success(t("pantalla_registrar_tarjeta.ocr_aplicado"))
                 st.rerun()
+
+
+def render_ocr_para_registro() -> None:
+    _render_ocr_formulario(
+        prefix=PREFIX_REG,
+        titulo_key="pantalla_registrar_tarjeta.ocr_titulo",
+        limpiar_callback=limpiar_formulario_registro,
+        limpiar_label_key="pantalla_registrar_tarjeta.limpiar_formulario",
+        limpiar_help_key="pantalla_registrar_tarjeta.limpiar_formulario_ayuda",
+        aplicar_kwargs={
+            "prefix": PREFIX_REG,
+            "widget_prefix": PREFIX_REG,
+            "limite_key": "limite",
+            "adeudado_key": "adeudado",
+            "digitos_key": "digitos",
+            "corte_key": "corte",
+            "pago_key": "pago",
+            "select_key_banco": "banco",
+            "select_key_nombre": "nombre_tarjeta",
+        },
+    )
+
+
+def render_ocr_para_editar() -> None:
+    _render_ocr_formulario(
+        prefix=PREFIX_EDIT,
+        titulo_key="pantalla_editar_tarjeta.ocr_titulo",
+        limpiar_callback=lambda: limpiar_ocr_analisis(PREFIX_EDIT),
+        limpiar_label_key="pantalla_editar_tarjeta.ocr_limpiar",
+        limpiar_help_key="pantalla_editar_tarjeta.ocr_limpiar_ayuda",
+        expanded=False,
+        aplicar_kwargs={
+            "prefix": PREFIX_EDIT,
+            "widget_prefix": PREFIX_EDIT,
+            "limite_key": "edit_limite",
+            "adeudado_key": "edit_adeudado",
+            "digitos_key": "edit_digitos",
+            "corte_key": "edit_corte",
+            "pago_key": "edit_pago",
+            "select_key_banco": "edit_banco",
+            "select_key_nombre": "edit_nombre",
+            "extra": _aplicar_extra_edit,
+        },
+    )
