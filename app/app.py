@@ -1,8 +1,11 @@
 """
 Punto de entrada principal — navegación y flujo de la app.
 
-Ejecutar desde la raíz del proyecto:
-    streamlit run streamlit_app.py
+Render ejecuta: streamlit run streamlit_app.py → app.app.main()
+
+Nueva tarjeta (Paso 1 OCR / file_uploader) vive en:
+  app/ui/wizard_tarjeta.py → _render_ocr_paso1()
+y se abre desde aquí cuando pagina == "registrar".
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ def main() -> None:
     from app.core.browser_store import hydrate_from_localstorage, storage_ready
 
     hydrate_from_localstorage()
-    # Esperar a que el bridge de localStorage entregue el bundle (sin tocar la URL)
     if not storage_ready():
         st.caption("Cargando…")
         return
@@ -45,14 +47,12 @@ def main() -> None:
 
     if _AUTH_KEY not in st.session_state:
         st.session_state[_AUTH_KEY] = False
-    # Compat con pantallas que aún leen unlocked
     if "unlocked" not in st.session_state:
         st.session_state.unlocked = False
 
     if "pagina" not in st.session_state:
         st.session_state.pagina = "inicio"
 
-    # Sesión viva solo en memoria: sin PIN en storage → nunca autenticado
     if st.session_state.get(_AUTH_KEY) and not pin_configurado():
         st.session_state[_AUTH_KEY] = False
         st.session_state.unlocked = False
@@ -69,7 +69,7 @@ def main() -> None:
 
     autenticado = bool(st.session_state.get(_AUTH_KEY)) and pin_configurado()
 
-    # Limpia restos del flujo antiguo basado en URL (ya no aplica en PWA).
+    # Sin banners técnicos (Modo Lab / URL / favoritos).
     st.session_state.pop("ti_pedir_guardar_favorito", None)
     st.session_state.pop("ti_url_state_warn", None)
 
@@ -111,6 +111,7 @@ def main() -> None:
     pagina = st.session_state.pagina
 
     if pagina == "registrar":
+        # Paso 1 file_uploader: app/ui/wizard_tarjeta.py (_render_ocr_paso1)
         render_registrar(lambda: navigate("inicio"), lambda: navigate("inicio"))
     elif pagina == "editar":
         tarjeta_id = st.session_state.get("editar_tarjeta_id", "")
