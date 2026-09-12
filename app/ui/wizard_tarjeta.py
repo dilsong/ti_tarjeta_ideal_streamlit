@@ -194,29 +194,33 @@ def _procesar_archivos_subidos(
 
 
 def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
-    """Paso 1: expander con file_uploader fijo (sin if) + text_area."""
+    """
+    Paso 1 — subir PDF/fotos + pegar texto.
+    El file_uploader va FUERA del expander (siempre visible en móvil/PWA).
+    """
     ocr_k = _ocr_key(prefix, 1)
 
+    # === UPLOADER SIEMPRE VISIBLE (no depende de OCR ni de expander) ===
+    st.markdown("#### 📎 Sube tu estado de cuenta")
+    archivos_subidos = st.file_uploader(
+        "Sube aquí tu PDF o imágenes del estado de cuenta",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key="uploader_paso1_fijo",
+    )
+    archivos_subidos = list(archivos_subidos or [])
+
+    if archivos_subidos:
+        for archivo in archivos_subidos:
+            if _es_pdf_upload(archivo):
+                st.caption(f"📄 {archivo.name}")
+            else:
+                img = _abrir_imagen_upload(archivo)
+                if img is not None:
+                    st.image(img, use_container_width=True, caption=archivo.name)
+
     with st.expander("Leer estado de cuenta (Paso 1)", expanded=True):
-        # --- INICIO: st.file_uploader OBLIGATORIO (sin condición if) ---
-        archivos_subidos = st.file_uploader(
-            "Sube aquí tu PDF o imágenes del estado de cuenta",
-            type=["pdf", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key="uploader_paso1_fijo",
-        )
-        # --- FIN file_uploader ---
-        archivos_subidos = list(archivos_subidos or [])
-
-        if archivos_subidos:
-            for archivo in archivos_subidos:
-                if _es_pdf_upload(archivo):
-                    st.caption(f"📄 {archivo.name}")
-                else:
-                    img = _abrir_imagen_upload(archivo)
-                    if img is not None:
-                        st.image(img, use_container_width=True, caption=archivo.name)
-
+        st.caption("También puedes pegar el texto del statement si no tienes el archivo a mano.")
         texto_manual = st.text_area(
             "O pega aquí el texto del estado de cuenta",
             height=90,
@@ -424,6 +428,8 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
     """Paso 1 — reglas. Devuelve True si el usuario avanzó al paso 2."""
     st.markdown(f"### {t('wizard_tarjeta.paso1_titulo')}")
     st.caption(t("wizard_tarjeta.paso1_texto"))
+    # Marcador de versión: si el móvil NO muestra esto, Render sirve un deploy viejo.
+    st.caption("TI · carga de archivos activa")
 
     _render_ocr_paso1(prefix, _aplicar_ocr_paso1)
 
