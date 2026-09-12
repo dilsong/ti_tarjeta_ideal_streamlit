@@ -445,6 +445,8 @@ def render_licencia_expirada() -> None:
 
 def render_pin_gate(on_unlock) -> None:
     """Crear PIN (solo si no existe en storage) o ingresar PIN para autenticar."""
+    # Si el móvil NO muestra esta línea, Render no desplegó el commit nuevo.
+    st.caption("TI build c84d2f5+")
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)

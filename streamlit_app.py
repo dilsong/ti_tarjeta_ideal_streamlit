@@ -1,18 +1,16 @@
 """
 Launcher Streamlit — TI App (PWA monousuario / Lab).
 
-Lab en PC con JSON compartido (solo local):
-
-    set TI_USE_FILESYSTEM=1
-    streamlit run streamlit_app.py
-
-Producción (Render / PWA):
-
-    streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0
-    # En Render el disco se ignora: PIN + tarjetas van a localStorage del teléfono
-    # (ti_pin_created, ti_app_auth_v1, ti_app_bundle_v1).
-    # FECHA_EXPIRACION_LICENCIA=2026-10-08
+Render ejecuta este archivo (Procfile / startCommand).
 """
+
+from __future__ import annotations
+
+import os
+
+# En Render el disco es efímero: nunca usar app/data para el usuario.
+if os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"):
+    os.environ["TI_USE_FILESYSTEM"] = "0"
 
 from app.app import main
 
