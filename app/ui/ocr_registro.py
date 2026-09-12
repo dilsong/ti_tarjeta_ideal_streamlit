@@ -21,7 +21,16 @@ from app.ui.form_intereses import aplicar_prefill_a_widgets, limpiar_widgets_int
 PREFIX_REG = "reg"
 PREFIX_EDIT = "edit"
 
-NOMBRES_TARJETA_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
+NOMBRES_TARJETA_DEFAULT = [
+    "Visa",
+    "Mastercard",
+    "American Express",
+    "Quicksilver",
+    "Venture",
+    "Savor",
+    "Platinum",
+    "Gold",
+]
 
 SESSION_OCR_DATOS = f"{PREFIX_REG}_ocr_datos"
 SESSION_PREFILL = f"{PREFIX_REG}_ocr_prefill"
@@ -83,27 +92,11 @@ def limpiar_ocr_analisis(prefix: str) -> None:
 
 
 def sugerir_banco_en_select(select_key: str, texto: str) -> None:
-    sugeridos = [
-        ("credit one", "Credit One"),
-        ("capital one", "Capital One"),
-        ("bank of america", "Bank of America"),
-        ("wells fargo", "Wells Fargo"),
-        ("american express", "American Express"),
-        ("bbva", "BBVA"),
-        ("banorte", "Banorte"),
-        ("santander", "Santander"),
-        ("scotiabank", "Scotiabank"),
-        ("inbursa", "Inbursa"),
-        ("chase", "Chase"),
-        ("discover", "Discover"),
-        ("citi", "Citi"),
-        ("hsbc", "HSBC"),
-    ]
-    texto_l = texto.lower()
-    for needle, banco in sugeridos:
-        if needle in texto_l:
-            init_select_with_add(select_key, "bancos", BANCOS_DEFAULT, banco, force=True)
-            break
+    from app.core.ocr_captura import detectar_banco
+
+    banco = detectar_banco(texto)
+    if banco:
+        init_select_with_add(select_key, "bancos", BANCOS_DEFAULT, banco, force=True)
 
 
 def _aplicar_a_formulario(
@@ -152,7 +145,9 @@ def _aplicar_a_formulario(
     st.session_state[_k(prefix, "prefill")] = prefill
     aplicar_prefill_a_widgets(widget_prefix, prefill)
 
-    if datos.texto_crudo:
+    if datos.banco:
+        init_select_with_add(select_key_banco, "bancos", BANCOS_DEFAULT, datos.banco, force=True)
+    elif datos.texto_crudo:
         sugerir_banco_en_select(select_key_banco, datos.texto_crudo)
 
     if extra:
@@ -170,6 +165,8 @@ def _aplicar_extra_edit(datos: DatosCaptura) -> None:
 
 def _mostrar_resumen(datos: DatosCaptura) -> None:
     filas: list[str] = []
+    if datos.banco:
+        filas.append(f"- **{t('pantalla_registrar_tarjeta.banco')}:** {datos.banco}")
     if datos.nombre_tarjeta:
         filas.append(
             f"- **{t('pantalla_registrar_tarjeta.nombre_tarjeta')}:** {datos.nombre_tarjeta}"

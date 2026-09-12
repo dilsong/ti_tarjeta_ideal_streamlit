@@ -32,7 +32,16 @@ from app.core.tarjetas import EstiloTarjeta, Tarjeta, guardar_tarjeta, obtener_t
 from app.i18n.translator import t
 from app.ui.form_intereses import aplicar_prefill_a_widgets, render_campos_intereses
 
-NOMBRES_DEFAULT = ["Visa", "Mastercard", "American Express", "Platinum", "Gold"]
+NOMBRES_DEFAULT = [
+    "Visa",
+    "Mastercard",
+    "American Express",
+    "Quicksilver",
+    "Venture",
+    "Savor",
+    "Platinum",
+    "Gold",
+]
 PREF_VALS = ["app", "web"]
 ESTILO_VALS = [EstiloTarjeta.REALISTA.value, EstiloTarjeta.SOLIDO.value, EstiloTarjeta.PREMIUM.value]
 
@@ -71,29 +80,33 @@ def _render_stepper(paso: int) -> None:
 
 
 def _aplicar_ocr_paso1(prefix: str, datos: DatosCaptura) -> None:
+    """Escribe valores OCR en las mismas keys que usan los widgets del Paso 1."""
     from app.ui.ocr_registro import NOMBRES_TARJETA_DEFAULT, sugerir_banco_en_select
 
-    if datos.limite is not None:
-        st.session_state[f"{prefix}_limite"] = f"{datos.limite:.2f}"
-    if datos.dia_corte is not None:
-        st.session_state[f"{prefix}_corte"] = str(int(datos.dia_corte))
-    if datos.dia_pago is not None:
-        st.session_state[f"{prefix}_pago"] = str(int(datos.dia_pago))
-    if datos.ultimos_digitos:
-        st.session_state[f"{prefix}_digitos"] = datos.ultimos_digitos
+    k = _keys_form(prefix)
 
-    select_banco = f"{prefix}_banco" if prefix == "reg" else "edit_banco"
-    select_nombre = f"{prefix}_nombre_tarjeta" if prefix == "reg" else "edit_nombre"
+    if datos.limite is not None:
+        st.session_state[k["limite"]] = f"{datos.limite:.2f}"
+    if datos.dia_corte is not None:
+        st.session_state[k["corte"]] = str(int(datos.dia_corte))
+    if datos.dia_pago is not None:
+        st.session_state[k["pago"]] = str(int(datos.dia_pago))
+    if datos.ultimos_digitos:
+        st.session_state[k["digitos"]] = str(datos.ultimos_digitos).strip()[:4]
+
     if datos.nombre_tarjeta:
         init_select_with_add(
-            select_nombre,
+            k["nombre"],
             "nombres_tarjeta",
             NOMBRES_TARJETA_DEFAULT,
             datos.nombre_tarjeta,
             force=True,
         )
-    if datos.texto_crudo:
-        sugerir_banco_en_select(select_banco, datos.texto_crudo)
+
+    if datos.banco:
+        init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, datos.banco, force=True)
+    elif datos.texto_crudo:
+        sugerir_banco_en_select(k["banco"], datos.texto_crudo)
 
     prefill: dict[str, float] = {}
     if datos.apr is not None:
@@ -109,22 +122,33 @@ def _aplicar_ocr_paso1(prefix: str, datos: DatosCaptura) -> None:
 
 
 def _aplicar_ocr_paso2(prefix: str, datos: DatosCaptura) -> None:
+    k = _keys_form(prefix)
     saldo_hoy = datos.current_balance if datos.current_balance is not None else datos.saldo
     saldo_cierre = datos.statement_balance if datos.statement_balance is not None else datos.pago_sin_intereses
 
     if saldo_hoy is not None:
-        st.session_state[f"{prefix}_adeudado"] = f"{saldo_hoy:.2f}"
+        st.session_state[k["adeudado"]] = f"{saldo_hoy:.2f}"
     if saldo_cierre is not None:
-        st.session_state[f"{prefix}_saldo_cierre"] = f"{saldo_cierre:.2f}"
+        st.session_state[k["saldo_cierre"]] = f"{saldo_cierre:.2f}"
     if datos.pago_minimo is not None:
-        st.session_state[f"{prefix}_pago_min_hoy"] = f"{datos.pago_minimo:.2f}"
+        st.session_state[k["pago_min_hoy"]] = f"{datos.pago_minimo:.2f}"
     if datos.monto_vencido_atrasado is not None:
-        st.session_state[f"{prefix}_past_due"] = f"{max(0.0, float(datos.monto_vencido_atrasado)):.2f}"
+        st.session_state[k["past_due"]] = f"{max(0.0, float(datos.monto_vencido_atrasado)):.2f}"
 
 
 def _mostrar_resumen_ocr(datos: DatosCaptura, paso: int) -> None:
     filas: list[str] = []
     if paso == 1:
+        if datos.banco:
+            filas.append(f"- **{t('pantalla_registrar_tarjeta.banco')}:** {datos.banco}")
+        if datos.nombre_tarjeta:
+            filas.append(
+                f"- **{t('pantalla_registrar_tarjeta.nombre_tarjeta')}:** {datos.nombre_tarjeta}"
+            )
+        if datos.ultimos_digitos:
+            filas.append(
+                f"- **{t('pantalla_registrar_tarjeta.ultimos_digitos')}:** {datos.ultimos_digitos}"
+            )
         campos = (
             (datos.limite, t("wizard_tarjeta.campo_limite")),
             (datos.dia_corte, t("pantalla_registrar_tarjeta.fecha_corte")),
@@ -176,7 +200,11 @@ def _procesar_archivos_subidos(
     """PDF → pypdf; imágenes → OCR; unifica en un solo DatosCaptura."""
     imagenes: list[Image.Image] = []
     pdfs: list[bytes] = []
+    nombres_archivo: list[str] = []
     for archivo in archivos_subidos or []:
+        nombre = getattr(archivo, "name", None)
+        if nombre:
+            nombres_archivo.append(str(nombre))
         if _es_pdf_upload(archivo):
             pdfs.append(archivo.getvalue())
         else:
@@ -189,6 +217,7 @@ def _procesar_archivos_subidos(
         imagenes=imgs,
         pdfs_bytes=pdfs if pdf_disponible() else [],
         texto_manual=texto_manual or "",
+        nombres_archivo=nombres_archivo or None,
     )
     return datos, imagenes, pdfs
 

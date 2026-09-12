@@ -30,6 +30,7 @@ class DatosCaptura:
     current_balance: float | None = None
     ultimos_digitos: str | None = None
     nombre_tarjeta: str | None = None
+    banco: str | None = None
     pago_minimo: float | None = None
     pago_sin_intereses: float | None = None
     monto_vencido_atrasado: float | None = None
@@ -53,6 +54,7 @@ class DatosCaptura:
                 self.current_balance,
                 self.ultimos_digitos,
                 self.nombre_tarjeta,
+                self.banco,
                 self.pago_minimo,
                 self.monto_vencido_atrasado,
             )
@@ -448,6 +450,94 @@ def _limpiar_texto_ocr(texto: str) -> str:
     return t
 
 
+# Orden: más específico primero (Credit One antes que Capital One).
+_BANCOS_DETECT: tuple[tuple[str, str], ...] = (
+    ("credit one", "Credit One"),
+    ("capital one", "Capital One"),
+    ("bank of america", "Bank of America"),
+    ("wells fargo", "Wells Fargo"),
+    ("american express", "American Express"),
+    ("scotiabank", "Scotiabank"),
+    ("santander", "Santander"),
+    ("banorte", "Banorte"),
+    ("inbursa", "Inbursa"),
+    ("discover", "Discover"),
+    ("chase", "Chase"),
+    ("bbva", "BBVA"),
+    ("citi", "Citi"),
+    ("hsbc", "HSBC"),
+)
+
+# Productos / marcas de tarjeta (antes que Visa/Mastercard genéricos).
+_PRODUCTOS_TARJETA: tuple[tuple[str, str], ...] = (
+    (r"\bquicksilver\b", "Quicksilver"),
+    (r"\bventure\s*x\b", "Venture X"),
+    (r"\bventure\s*one\b", "VentureOne"),
+    (r"\bventure\b", "Venture"),
+    (r"\bsavor\s*(?:one)?\b", "Savor"),
+    (r"\bfreedom\s+unlimited\b", "Freedom Unlimited"),
+    (r"\bfreedom\s+flex\b", "Freedom Flex"),
+    (r"\bsapphire\s+preferred\b", "Sapphire Preferred"),
+    (r"\bsapphire\s+reserve\b", "Sapphire Reserve"),
+    (r"\bdouble\s+cash\b", "Double Cash"),
+    (r"\bcustom\s+cash\b", "Custom Cash"),
+    (r"\bsimplicity\b", "Simplicity"),
+    (r"\bwalmart\s+rewards?\b", "Walmart Rewards"),
+    (r"\bworld\s+elite\b", "World Elite"),
+    (r"\bplatinum\b", "Platinum"),
+    (r"\bgold\b", "Gold"),
+)
+
+_REDES_TARJETA: tuple[tuple[str, str], ...] = (
+    (r"american\s*express|\bamax\b", "American Express"),
+    (r"master\s*card|mastercard", "Mastercard"),
+    (r"\bvisa\b", "Visa"),
+    (r"\bdiscover\b", "Discover"),
+)
+
+
+def detectar_banco(texto: str) -> str | None:
+    """Detecta el emisor (Capital One, BBVA, Chase, …) en texto de estado de cuenta."""
+    low = (texto or "").lower()
+    for needle, banco in _BANCOS_DETECT:
+        if needle in low:
+            return banco
+    return None
+
+
+def detectar_nombre_tarjeta(texto: str) -> str | None:
+    """Producto (Quicksilver, …) o, si no hay, red (Visa / Mastercard / …)."""
+    low = (texto or "").lower()
+    for pat, nombre in _PRODUCTOS_TARJETA:
+        if re.search(pat, low, re.IGNORECASE):
+            return nombre
+    for pat, nombre in _REDES_TARJETA:
+        if re.search(pat, low, re.IGNORECASE):
+            return nombre
+    return None
+
+
+def detectar_ultimos_digitos(texto: str) -> str | None:
+    """Últimos 4: 'termina en XXXX', '#XXXX', 'ending in', xxxx-6771, etc."""
+    if not texto:
+        return None
+    for pat in (
+        r"(?:n[uú]mero\s+de\s+)?cuenta\s+que\s+termina(?:d[ao])?\s+en\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
+        r"termina(?:d[ao])?\s+en\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
+        r"que\s+termina\s+en\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
+        r"(?:account\s+(?:number\s+)?)?(?:that\s+)?(?:ends?|ending)\s+in\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
+        r"end(?:ing)?\s+in\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
+        r"account\s+number\s*[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
+        r"(?:#{1}|x{4}|\*{4}|•{4}|xxxx)[-\s]*(\d{4})\b",
+        r"#\s*(\d{4})\b",
+        r"\b(?:\d{4}[\s-]*){3}(\d{4})\b",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
+
+
 def extraer_datos_captura(texto: str) -> DatosCaptura:
     bruto = texto or ""
     r = DatosCaptura(texto_crudo=bruto)
@@ -712,15 +802,8 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     if r.disponible is None and r.limite is not None and r.saldo is not None:
         r.disponible = max(0.0, round(r.limite - r.saldo, 2))
 
-    low = texto.lower()
-    if re.search(r"american\s*express|\bamax\b", low):
-        r.nombre_tarjeta = "American Express"
-    elif re.search(r"master\s*card|mastercard", low):
-        r.nombre_tarjeta = "Mastercard"
-    elif re.search(r"\bvisa\b", low):
-        r.nombre_tarjeta = "Visa"
-    elif re.search(r"\bdiscover\b", low):
-        r.nombre_tarjeta = "Discover"
+    r.banco = detectar_banco(texto)
+    r.nombre_tarjeta = detectar_nombre_tarjeta(texto)
 
     # Pago mínimo: directo en la misma línea (más preciso) y luego por columnas.
     for pat in (
@@ -775,18 +858,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                     r.pago_minimo = val
                     break
 
-    for pat in (
-        r"account\s+number\s*[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
-        r"\b(?:\d{4}[\s-]*){3}(\d{4})\b",
-        r"termina(?:d[ao])?\s+en\s*(\d{4})\b",
-        r"que\s+termina\s+en\s*(\d{4})\b",
-        r"cuenta\s+que\s+termina\s+en\s*(\d{4})\b",
-        r"(?:\*{2,}|\bend(?:ing)?\s+in\b)[^\d]{0,12}(\d{4})\b",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            r.ultimos_digitos = m.group(1)
-            break
+    r.ultimos_digitos = detectar_ultimos_digitos(texto)
 
     for pat in (
         r"(?:Purchase\s+)?APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
@@ -1031,6 +1103,7 @@ def procesar_fuentes_captura(
     imagenes: list[Image.Image] | None = None,
     pdfs_bytes: list[bytes] | None = None,
     texto_manual: str = "",
+    nombres_archivo: list[str] | None = None,
 ) -> DatosCaptura:
     """
     Unifica varias fuentes (PDF multi-página + N imágenes + texto pegado)
@@ -1038,6 +1111,7 @@ def procesar_fuentes_captura(
     """
     imagenes = list(imagenes or [])
     pdfs_bytes = list(pdfs_bytes or [])
+    nombres = [n.strip() for n in (nombres_archivo or []) if n and str(n).strip()]
     partes: list[str] = []
     extras: list[DatosCaptura] = []
 
@@ -1059,9 +1133,26 @@ def procesar_fuentes_captura(
     if manual:
         partes.append(manual)
 
+    if nombres:
+        partes.append("\n".join(nombres))
+
     resultado = extraer_datos_captura("\n\n".join(partes))
     for extra in extras:
         resultado = _completar_vacios(resultado, extra)
+
+    if nombres and (
+        resultado.banco is None
+        or resultado.nombre_tarjeta is None
+        or resultado.ultimos_digitos is None
+    ):
+        nombres_join = "\n".join(nombres)
+        if resultado.banco is None:
+            resultado.banco = detectar_banco(nombres_join)
+        if resultado.nombre_tarjeta is None:
+            resultado.nombre_tarjeta = detectar_nombre_tarjeta(nombres_join)
+        if resultado.ultimos_digitos is None:
+            resultado.ultimos_digitos = detectar_ultimos_digitos(nombres_join)
+
     return resultado
 
 
