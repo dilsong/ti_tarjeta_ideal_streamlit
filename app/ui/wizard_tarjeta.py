@@ -167,78 +167,170 @@ def _abrir_imagen_upload(archivo) -> Image.Image | None:
         return None
 
 
+def _procesar_archivos_subidos(
+    archivos_subidos: list,
+    texto_manual: str,
+    *,
+    usar_ocr_imagenes: bool,
+) -> tuple[DatosCaptura, list[Image.Image], list[bytes]]:
+    """PDF → pypdf; imágenes → OCR; unifica en un solo DatosCaptura."""
+    imagenes: list[Image.Image] = []
+    pdfs: list[bytes] = []
+    for archivo in archivos_subidos or []:
+        if _es_pdf_upload(archivo):
+            pdfs.append(archivo.getvalue())
+        else:
+            img = _abrir_imagen_upload(archivo)
+            if img is not None:
+                imagenes.append(img)
+
+    imgs = imagenes if usar_ocr_imagenes else []
+    datos = procesar_fuentes_captura(
+        imagenes=imgs,
+        pdfs_bytes=pdfs if pdf_disponible() else [],
+        texto_manual=texto_manual or "",
+    )
+    return datos, imagenes, pdfs
+
+
+def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
+    """
+    Paso 1 — cargador siempre visible (no depende de Tesseract).
+    PDF + varias fotos encima del área de texto pegado.
+    """
+    ocr_k = _ocr_key(prefix, 1)
+    hay_ocr = ocr_disponible()
+
+    st.markdown(f"**{t('wizard_tarjeta.ocr_p1_titulo')}**")
+    st.caption(t("wizard_tarjeta.ocr_p1_ayuda"))
+
+    # Siempre en pantalla (móvil / PWA): no ocultar si falta Tesseract.
+    archivos_subidos = st.file_uploader(
+        t("wizard_tarjeta.ocr_uploader_paso1"),
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        key=f"{prefix}_uploader_paso1",
+        help=t("wizard_tarjeta.ocr_uploader_paso1_help"),
+    )
+    archivos_subidos = list(archivos_subidos or [])
+
+    if archivos_subidos:
+        n_pdf = sum(1 for f in archivos_subidos if _es_pdf_upload(f))
+        n_img = len(archivos_subidos) - n_pdf
+        st.caption(
+            t(
+                "wizard_tarjeta.ocr_multi_resumen",
+                n=len(archivos_subidos),
+                imgs=n_img,
+                pdfs=n_pdf,
+            )
+        )
+        for archivo in archivos_subidos:
+            if _es_pdf_upload(archivo):
+                st.caption(f"📄 {archivo.name}")
+            else:
+                img = _abrir_imagen_upload(archivo)
+                if img is not None:
+                    st.image(img, use_container_width=True, caption=archivo.name)
+
+    if not hay_ocr:
+        st.caption(t("wizard_tarjeta.ocr_imagenes_sin_tesseract"))
+
+    texto_manual = st.text_area(
+        t("pantalla_registrar_tarjeta.ocr_texto_manual"),
+        height=90,
+        key=f"{prefix}_ocr_p1_manual",
+        placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
+    )
+
+    puede = bool(archivos_subidos or (texto_manual or "").strip())
+    if st.button(
+        t("pantalla_registrar_tarjeta.ocr_analizar"),
+        type="primary",
+        use_container_width=True,
+        disabled=not puede,
+        key=f"{prefix}_ocr_p1_analizar",
+    ):
+        if archivos_subidos and any(_es_pdf_upload(f) for f in archivos_subidos) and not pdf_disponible():
+            st.error(t("wizard_tarjeta.ocr_pdf_no_disponible"))
+        if archivos_subidos and any(not _es_pdf_upload(f) for f in archivos_subidos) and not hay_ocr:
+            st.warning(t("pantalla_registrar_tarjeta.ocr_no_disponible_pegar"))
+
+        datos, imagenes, pdfs = _procesar_archivos_subidos(
+            archivos_subidos,
+            texto_manual or "",
+            usar_ocr_imagenes=hay_ocr,
+        )
+        st.session_state[ocr_k] = datos.to_dict()
+
+        if not datos.texto_crudo.strip() and not (texto_manual or "").strip() and not imagenes and not pdfs:
+            st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
+        elif pdfs and not datos.texto_crudo.strip() and not imagenes and not (texto_manual or "").strip():
+            st.warning(t("wizard_tarjeta.ocr_pdf_sin_texto"))
+        elif not datos.tiene_reglas_banco():
+            st.warning(t("wizard_tarjeta.ocr_p1_sin_reglas"))
+        elif len(archivos_subidos) > 1 and datos.tiene_reglas_banco():
+            st.success(t("wizard_tarjeta.ocr_multi_ok"))
+
+    raw = st.session_state.get(ocr_k)
+    if raw:
+        datos = DatosCaptura.from_dict(raw)
+        st.markdown(f"**{t('pantalla_registrar_tarjeta.ocr_resultado')}**")
+        _mostrar_resumen_ocr(datos, 1)
+        if st.button(
+            t("pantalla_registrar_tarjeta.ocr_usar"),
+            type="primary",
+            use_container_width=True,
+            key=f"{prefix}_ocr_p1_usar",
+        ):
+            aplicar_fn(prefix, datos)
+            st.success(t("pantalla_registrar_tarjeta.ocr_aplicado"))
+            st.rerun()
+
+
 def _render_ocr_bloque(
     prefix: str,
     paso: int,
     procesar_fn,
     aplicar_fn,
 ) -> None:
+    """Paso 2 (u otros): una captura; el Paso 1 usa _render_ocr_paso1."""
+    if paso == 1:
+        _render_ocr_paso1(prefix, aplicar_fn)
+        return
+
     ocr_k = _ocr_key(prefix, paso)
     hay_ocr = ocr_disponible()
-    titulo = t("wizard_tarjeta.ocr_p1_titulo") if paso == 1 else t("wizard_tarjeta.ocr_p2_titulo")
-    ayuda = t("wizard_tarjeta.ocr_p1_ayuda") if paso == 1 else t("wizard_tarjeta.ocr_p2_ayuda")
-    multi = paso == 1
+    titulo = t("wizard_tarjeta.ocr_p2_titulo")
+    ayuda = t("wizard_tarjeta.ocr_p2_ayuda")
 
     with st.expander(titulo, expanded=True):
         st.caption(ayuda)
         capturas: list = []
-        # Paso 1: PDF + varias imágenes (reglas pueden venir en varios documentos).
-        # Paso 2: una captura de la app (saldos).
-        mostrar_uploader = multi or hay_ocr
-        if mostrar_uploader:
-            tipos = ["png", "jpg", "jpeg", "pdf"] if multi else ["png", "jpg", "jpeg", "webp"]
-            label = (
-                t("wizard_tarjeta.ocr_uploader_multi")
-                if multi
-                else t("wizard_tarjeta.ocr_uploader")
-            )
-            subido = st.file_uploader(
-                label,
-                type=tipos,
-                accept_multiple_files=multi,
-                key=f"{prefix}_ocr_p{paso}_upload",
-            )
-            if multi:
-                capturas = list(subido or [])
-            elif subido is not None:
-                capturas = [subido]
+        # Siempre ofrecer uploader también en paso 2 (foto de la app).
+        subido = st.file_uploader(
+            t("wizard_tarjeta.ocr_uploader"),
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=False,
+            key=f"{prefix}_ocr_p{paso}_upload",
+        )
+        if subido is not None:
+            capturas = [subido]
+            img = _abrir_imagen_upload(subido)
+            if img is not None:
+                st.image(img, use_container_width=True)
+            else:
+                st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
 
-            if capturas:
-                n_pdf = sum(1 for f in capturas if _es_pdf_upload(f))
-                n_img = len(capturas) - n_pdf
-                if multi and len(capturas) > 1:
-                    st.caption(
-                        t(
-                            "wizard_tarjeta.ocr_multi_resumen",
-                            n=len(capturas),
-                            imgs=n_img,
-                            pdfs=n_pdf,
-                        )
-                    )
-                for archivo in capturas:
-                    if _es_pdf_upload(archivo):
-                        st.info(f"📄 {archivo.name} — {t('wizard_tarjeta.ocr_pdf_hint')}")
-                    else:
-                        img = _abrir_imagen_upload(archivo)
-                        if img is not None:
-                            st.image(img, use_container_width=True, caption=archivo.name)
-                        else:
-                            st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
-
-            texto_manual = st.text_area(
-                t("pantalla_registrar_tarjeta.ocr_texto_manual"),
-                height=90,
-                key=f"{prefix}_ocr_p{paso}_manual",
-                placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
-            )
-        else:
+        if not hay_ocr:
             st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
-            texto_manual = st.text_area(
-                t("pantalla_registrar_tarjeta.ocr_texto_manual_solo"),
-                height=100,
-                key=f"{prefix}_ocr_p{paso}_manual",
-                placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
-            )
+
+        texto_manual = st.text_area(
+            t("pantalla_registrar_tarjeta.ocr_texto_manual"),
+            height=90,
+            key=f"{prefix}_ocr_p{paso}_manual",
+            placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
+        )
 
         puede = bool(capturas or (texto_manual or "").strip())
         if st.button(
@@ -248,52 +340,19 @@ def _render_ocr_bloque(
             disabled=not puede,
             key=f"{prefix}_ocr_p{paso}_analizar",
         ):
-            imagenes: list[Image.Image] = []
-            pdfs: list[bytes] = []
-            for archivo in capturas:
-                if _es_pdf_upload(archivo):
-                    pdfs.append(archivo.getvalue())
-                else:
-                    img = _abrir_imagen_upload(archivo)
-                    if img is not None:
-                        imagenes.append(img)
-
-            if multi:
-                if imagenes and not hay_ocr:
-                    st.warning(t("pantalla_registrar_tarjeta.ocr_no_disponible_pegar"))
-                imgs = imagenes if hay_ocr else []
-                if pdfs and not pdf_disponible():
-                    st.error(t("wizard_tarjeta.ocr_pdf_no_disponible"))
-                    datos = procesar_fuentes_captura(
-                        imagenes=imgs,
-                        texto_manual=texto_manual or "",
-                    )
-                else:
-                    datos = procesar_fuentes_captura(
-                        imagenes=imgs,
-                        pdfs_bytes=pdfs,
-                        texto_manual=texto_manual or "",
-                    )
-            else:
-                imagen = imagenes[0] if imagenes else None
-                datos = procesar_fn(imagen, texto_manual or "")
-
-            st.session_state[ocr_k] = datos.to_dict()
-            if (
-                not datos.texto_crudo.strip()
-                and not imagenes
-                and not (texto_manual or "").strip()
-                and (not pdfs or not datos.tiene_algo())
-            ):
+            imagen = None
+            if capturas:
+                imagen = _abrir_imagen_upload(capturas[0])
+            if imagen is not None and not hay_ocr and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
-            elif pdfs and not datos.texto_crudo.strip() and not imagenes:
-                st.warning(t("wizard_tarjeta.ocr_pdf_sin_texto"))
-            elif paso == 1 and not datos.tiene_reglas_banco():
-                st.warning(t("wizard_tarjeta.ocr_p1_sin_reglas"))
-            elif paso == 2 and not datos.tiene_saldos_hoy():
+                datos = procesar_fn(None, texto_manual or "")
+            else:
+                datos = procesar_fn(imagen if hay_ocr else None, texto_manual or "")
+            st.session_state[ocr_k] = datos.to_dict()
+            if not datos.texto_crudo.strip() and imagen is None and not (texto_manual or "").strip():
+                st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
+            elif not datos.tiene_saldos_hoy():
                 st.warning(t("wizard_tarjeta.ocr_p2_sin_saldos"))
-            elif multi and (len(imagenes) + len(pdfs)) > 1 and datos.tiene_reglas_banco():
-                st.success(t("wizard_tarjeta.ocr_multi_ok"))
 
         raw = st.session_state.get(ocr_k)
         if raw:
@@ -380,7 +439,7 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
     st.markdown(f"### {t('wizard_tarjeta.paso1_titulo')}")
     st.caption(t("wizard_tarjeta.paso1_texto"))
 
-    _render_ocr_bloque(prefix, 1, None, _aplicar_ocr_paso1)
+    _render_ocr_paso1(prefix, _aplicar_ocr_paso1)
 
     k = _keys_form(prefix)
     banco = select_with_add(

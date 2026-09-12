@@ -64,18 +64,18 @@ def main() -> None:
             return
         st.session_state[_AUTH_KEY] = True
         st.session_state.unlocked = True
+        st.session_state.pagina = "inicio"
         st.rerun()
 
     autenticado = bool(st.session_state.get(_AUTH_KEY)) and pin_configurado()
 
+    # Limpia restos del flujo antiguo basado en URL (ya no aplica en PWA).
+    st.session_state.pop("ti_pedir_guardar_favorito", None)
+    st.session_state.pop("ti_url_state_warn", None)
+
     if not autenticado:
         st.session_state[_AUTH_KEY] = False
         st.session_state.unlocked = False
-        if not pin_configurado():
-            st.info(
-                "Primer uso: crea tu PIN de seguridad (4 a 6 dígitos). "
-                "Quedará guardado en este dispositivo; no tendrás que crearlo de nuevo."
-            )
         render_pin_gate(unlock)
         return
 

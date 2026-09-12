@@ -154,6 +154,25 @@ MOBILE_CSS = """
         display: none !important;
     }
 
+    /* File uploader — visible y usable en móvil / PWA */
+    [data-testid="stFileUploader"] {
+        width: 100% !important;
+        margin: 0.5rem 0 0.75rem 0 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] {
+        min-height: 4.5rem !important;
+        padding: 0.85rem !important;
+        border: 1.5px dashed #64748B !important;
+        border-radius: 12px !important;
+        background: #1E293B !important;
+    }
+    [data-testid="stFileUploaderDropzone"] * {
+        color: #E2E8F0 !important;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"] span {
+        font-size: 0.9rem !important;
+    }
+
     /* Botones */
     div.stButton > button {
         border-radius: 12px !important;
