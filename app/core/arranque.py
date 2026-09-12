@@ -31,6 +31,7 @@ def vaciar_datos_usuario() -> None:
         limpio["config"]["idioma"] = idioma or "es"
         limpio["config"]["pin_hash"] = ""
         limpio["config"]["pin_salt"] = ""
+        limpio["config"]["pin_configurado"] = False
         replace_bundle(limpio)
         return
 
@@ -50,7 +51,7 @@ def vaciar_datos_usuario() -> None:
     _write_json(_DATA_DIR / "consumos.json", [])
     _write_json(
         _DATA_DIR / "config.json",
-        {"idioma": idioma, "pin_hash": "", "pin_salt": ""},
+        {"idioma": idioma, "pin_hash": "", "pin_salt": "", "pin_configurado": False},
     )
 
 
@@ -76,6 +77,8 @@ def asegurar_arranque_limpio_sin_pin() -> None:
 
             limpio = empty_bundle()
             limpio["config"]["idioma"] = idioma or "es"
+            if isinstance(bundle.get("device_id"), str):
+                limpio["device_id"] = bundle["device_id"]
             replace_bundle(limpio)
         return
 

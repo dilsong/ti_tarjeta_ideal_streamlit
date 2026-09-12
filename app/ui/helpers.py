@@ -444,7 +444,7 @@ def render_licencia_expirada() -> None:
 
 
 def render_pin_gate(on_unlock) -> None:
-    """Pantalla de crear PIN (primera vez) o desbloquear. Bloquea toda la UI."""
+    """Crear PIN (solo si no existe en storage) o ingresar PIN para autenticar."""
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)
@@ -480,14 +480,13 @@ def _render_crear_pin(on_unlock) -> None:
             elif crear_pin(pin2):
                 st.session_state.pop("pin_step", None)
                 st.session_state.pop("pin_temp", None)
-                st.session_state["ti_pedir_guardar_favorito"] = True
                 on_unlock()
             else:
                 error.error(t("pantalla_pin.error_pin_corto"))
 
 
 def _render_desbloquear(on_unlock) -> None:
-    st.title("💳 " + t("pantalla_pin.desbloquear_titulo"))
+    st.title("🔐 " + t("pantalla_pin.desbloquear_titulo"))
     st.info(t("pantalla_pin.desbloquear_subtitulo"))
 
     error = st.empty()

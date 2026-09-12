@@ -978,6 +978,42 @@ def procesar_ocr_saldos(imagen: Image.Image | None, texto_manual: str = "") -> D
     return procesar_imagen_y_texto(imagen, texto_manual)
 
 
+def pdf_disponible() -> bool:
+    try:
+        import pypdf  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def texto_desde_pdf(data: bytes) -> str:
+    """Extrae texto de todas las páginas de un PDF (capa de texto)."""
+    from io import BytesIO
+
+    if not data:
+        return ""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+
+    try:
+        reader = PdfReader(BytesIO(data))
+    except Exception:
+        return ""
+
+    partes: list[str] = []
+    for i, page in enumerate(reader.pages, start=1):
+        try:
+            texto = page.extract_text() or ""
+        except Exception:
+            texto = ""
+        if texto.strip():
+            partes.append(f"--- page {i} ---\n{texto.strip()}")
+    return "\n\n".join(partes)
+
+
 def _completar_vacios(destino: DatosCaptura, extra: DatosCaptura) -> DatosCaptura:
     """Rellena solo los campos que la lectura principal no logró interpretar."""
     for campo in fields(DatosCaptura):
@@ -990,21 +1026,47 @@ def _completar_vacios(destino: DatosCaptura, extra: DatosCaptura) -> DatosCaptur
     return destino
 
 
-def procesar_imagen_y_texto(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
+def procesar_fuentes_captura(
+    *,
+    imagenes: list[Image.Image] | None = None,
+    pdfs_bytes: list[bytes] | None = None,
+    texto_manual: str = "",
+) -> DatosCaptura:
+    """
+    Unifica varias fuentes (PDF multi-página + N imágenes + texto pegado)
+    en un solo DatosCaptura antes del Paso 2.
+    """
+    imagenes = list(imagenes or [])
+    pdfs_bytes = list(pdfs_bytes or [])
     partes: list[str] = []
-    filas = ""
-    if imagen is not None:
+    extras: list[DatosCaptura] = []
+
+    for raw in pdfs_bytes:
+        texto_pdf = texto_desde_pdf(raw)
+        if texto_pdf.strip():
+            partes.append(texto_pdf.strip())
+            extras.append(extraer_datos_captura(texto_pdf))
+
+    for imagen in imagenes:
         ocr = texto_desde_imagen(imagen)
         if ocr.strip():
-            partes.append(ocr)
+            partes.append(ocr.strip())
         filas = texto_por_filas_desde_imagen(imagen)
+        if filas.strip():
+            extras.append(extraer_datos_captura(filas))
+
     manual = (texto_manual or "").strip()
     if manual:
         partes.append(manual)
 
-    resultado = extraer_datos_captura("\n".join(partes))
-    if filas.strip():
-        # Segunda pasada con las columnas reagrupadas: solo aporta lo que falte.
-        por_filas = extraer_datos_captura("\n".join([filas, manual]) if manual else filas)
-        resultado = _completar_vacios(resultado, por_filas)
+    resultado = extraer_datos_captura("\n\n".join(partes))
+    for extra in extras:
+        resultado = _completar_vacios(resultado, extra)
     return resultado
+
+
+def procesar_imagen_y_texto(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
+    return procesar_fuentes_captura(
+        imagenes=[imagen] if imagen is not None else [],
+        texto_manual=texto_manual,
+    )

@@ -23,6 +23,7 @@ def main() -> None:
 
     setup_page()
     init_i18n()
+    st.session_state.autenticado = True
     st.session_state.unlocked = True
 
     tarjeta_id = st.session_state.get("editar_tarjeta_id", "")

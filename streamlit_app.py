@@ -1,17 +1,16 @@
 """
-Launcher Streamlit — piloto con data por dispositivo (?ti= en la URL).
+Launcher Streamlit — TI App (PWA monousuario / Lab).
 
-Cada piloto guarda su data en un archivo propio ligado al enlace.
 Lab en PC con JSON compartido:
 
     set TI_USE_FILESYSTEM=1
     streamlit run streamlit_app.py
 
-Producción (Render / PWA monousuario):
+Producción (Render / PWA, dominio fijo):
 
     streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0
-    # TI_USE_FILESYSTEM=0  → data en la URL (?ti=&s=), disco efímero OK
-    # TI_USE_FILESYSTEM=1  → app/data/*.json (solo con disco persistente)
+    # TI_USE_FILESYSTEM=0  → PIN + datos en localStorage del navegador/PWA
+    # TI_USE_FILESYSTEM=1  → app/data/*.json (disco persistente)
     # FECHA_EXPIRACION_LICENCIA=2026-10-08  → bloqueo total tras esa fecha
 """
 

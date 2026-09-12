@@ -22,6 +22,7 @@ def main() -> None:
 
     setup_page()
     init_i18n()
+    st.session_state.autenticado = True
     st.session_state.unlocked = True
 
     def back() -> None:

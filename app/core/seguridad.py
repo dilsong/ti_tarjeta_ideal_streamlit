@@ -1,9 +1,9 @@
 """
-Gestión del PIN local encriptado (monousuario).
+Gestión del PIN local encriptado (monousuario / PWA).
 
-Primera vez: crear PIN de 4 a 6 dígitos.
-Siguientes veces: verificar PIN.
-Sin usuarios, perfiles ni autenticación remota.
+Persistencia: localStorage (PWA) o app/data/config.json (Lab).
+La sesión st.session_state['autenticado'] NO se persiste: al recargar pide PIN,
+pero nunca vuelve a pedir crearlo si ya está en storage.
 """
 
 from __future__ import annotations
@@ -31,9 +31,12 @@ def _load_config() -> dict[str, Any]:
     if use_browser_storage():
         return read_config()
     if not _CONFIG_FILE.exists():
-        return {"pin_hash": "", "pin_salt": "", "idioma": "es"}
+        return {"pin_hash": "", "pin_salt": "", "idioma": "es", "pin_configurado": False}
     with _CONFIG_FILE.open(encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {"pin_hash": "", "pin_salt": "", "idioma": "es", "pin_configurado": False}
+    return data
 
 
 def _save_config(config: dict[str, Any]) -> None:
@@ -53,12 +56,15 @@ def _hash_pin(pin: str, salt: bytes) -> str:
 
 
 def pin_configurado() -> bool:
+    """True si esta instancia ya tiene PIN en DB/localStorage (no depende de la URL)."""
     config = _load_config()
+    if config.get("pin_configurado") and config.get("pin_hash") and config.get("pin_salt"):
+        return True
     return bool(config.get("pin_hash") and config.get("pin_salt"))
 
 
 def crear_pin(pin: str) -> bool:
-    """Crea y persiste un PIN de 4–6 dígitos encriptado localmente."""
+    """Crea y persiste un PIN de 4–6 dígitos; marca la instancia como configurada."""
     if not pin_valido(pin):
         return False
 
@@ -66,12 +72,13 @@ def crear_pin(pin: str) -> bool:
     config = _load_config()
     config["pin_salt"] = salt.hex()
     config["pin_hash"] = _hash_pin(pin, salt)
+    config["pin_configurado"] = True
     _save_config(config)
     return True
 
 
 def verificar_pin(pin: str) -> bool:
-    """Verifica el PIN contra el hash almacenado localmente."""
+    """Verifica el PIN contra el hash almacenado en storage."""
     if not pin_valido(pin):
         return False
     config = _load_config()

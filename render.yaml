@@ -14,8 +14,8 @@ services:
       --browser.gatherUsageStats=false
     healthCheckPath: /
     envVars:
-      # Monousuario Lab en disco (requiere disco persistente en planes de pago).
-      # En free/efímero usa "0" para persistir en la URL (?ti=&s=).
+      # "0" = PIN y datos en localStorage del PWA (dominio fijo; sin ?ti=&s=)
+      # "1" = Lab con app/data/*.json (disco persistente)
       - key: TI_USE_FILESYSTEM
         value: "0"
       # Fin de la prueba (ISO). Tras esta fecha la app muestra bloqueo de licencia.

@@ -292,6 +292,7 @@ def main() -> None:
     init_i18n()
     if "pagina" not in st.session_state:
         st.session_state.pagina = "inicio"
+    st.session_state.autenticado = True
     st.session_state.unlocked = True
 
     def nav(p: str) -> None:

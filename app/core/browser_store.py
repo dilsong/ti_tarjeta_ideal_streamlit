@@ -1,15 +1,11 @@
 """
-Persistencia por dispositivo (modo piloto).
+Persistencia monousuario (PWA con dominio fijo).
 
-En Streamlit Cloud el disco (/tmp) y localStorage NO sirven entre visitas.
-La fuente de verdad es el propio enlace:
+- Lab: TI_USE_FILESYSTEM=1 → app/data/*.json
+- PWA / Render: localStorage del origen (sin ?ti= / &s= en la URL)
 
-  ?ti=<id>&s=<datos comprimidos>
-
-El usuario debe guardar en favoritos el enlace DESPUÉS de crear el PIN
-(cuando ya aparece &s=…), porque ahí van sus datos.
-
-Lab compartido: TI_USE_FILESYSTEM=1 → app/data/*.json
+El PIN vive en el bundle (config.pin_hash / pin_salt) dentro de localStorage.
+st.session_state['autenticado'] es solo de sesión: al recargar pide PIN, nunca recrearlo.
 """
 
 from __future__ import annotations
@@ -18,7 +14,6 @@ import base64
 import gzip
 import json
 import os
-import re
 import uuid
 from copy import deepcopy
 from pathlib import Path
@@ -27,12 +22,7 @@ from typing import Any
 _SESSION_BUNDLE = "ti_local_bundle"
 _SESSION_HYDRATED = "ti_local_hydrated"
 _SESSION_DEVICE = "ti_device_id"
-_SESSION_URL_WARN = "ti_url_state_warn"
-_DEVICE_PARAM = "ti"
-_STATE_PARAM = "s"
-_DEVICE_ID_RE = re.compile(r"^[a-f0-9]{32}$")
-# Límite práctico de URL en móviles; si se pasa, avisamos.
-_MAX_STATE_CHARS = 7000
+_SESSION_LS_FLUSH = "ti_ls_flush_seq"
 
 _DEFAULT_NOTIF: dict[str, Any] = {
     "notificar_dia_corte": True,
@@ -51,23 +41,20 @@ _DEFAULT_NOTIF: dict[str, Any] = {
 
 
 def _is_streamlit_cloud() -> bool:
-    """Solo Community Cloud (repo montado en /mount/src)."""
     return os.path.isdir("/mount/src")
 
 
 def _is_render() -> bool:
-    """Render.com — disco efímero; conviene data por URL/dispositivo."""
     return bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
 
 
 def use_browser_storage() -> bool:
-    """True = data por dispositivo (piloto). False = app/data compartido (Lab)."""
+    """True = localStorage PWA. False = app/data compartido (Lab)."""
     flag = os.environ.get("TI_USE_FILESYSTEM", "").strip().lower()
     if flag in ("1", "true", "yes", "on"):
         return False
     if flag in ("0", "false", "no", "off"):
         return True
-    # Sin flag: Cloud / Render → URL; Lab local → filesystem si ya lo usas a mano.
     if _is_streamlit_cloud() or _is_render():
         return True
     return True
@@ -83,8 +70,10 @@ def empty_bundle() -> dict[str, Any]:
             "pin_hash": "",
             "pin_salt": "",
             "idioma": "es",
+            "pin_configurado": False,
         },
         "notificaciones": deepcopy(_DEFAULT_NOTIF),
+        "device_id": "",
     }
 
 
@@ -100,6 +89,9 @@ def merge_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(cfg, dict):
         merged_cfg = dict(base["config"])
         merged_cfg.update(cfg)
+        # Marca explícita o implícita si ya hay hash
+        if merged_cfg.get("pin_hash") and merged_cfg.get("pin_salt"):
+            merged_cfg["pin_configurado"] = True
         base["config"] = merged_cfg
     notif = raw.get("notificaciones")
     if isinstance(notif, dict):
@@ -108,6 +100,8 @@ def merge_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(merged_n.get("historial_enviados"), list):
             merged_n["historial_enviados"] = []
         base["notificaciones"] = merged_n
+    if isinstance(raw.get("device_id"), str) and raw["device_id"]:
+        base["device_id"] = raw["device_id"]
     return base
 
 
@@ -124,30 +118,8 @@ def _device_path(device_id: str) -> Path:
     return _devices_dir() / f"{device_id}.json"
 
 
-def _valid_device_id(value: str) -> bool:
-    return bool(_DEVICE_ID_RE.match(value or ""))
-
-
-def _qp_get(name: str) -> str:
-    import streamlit as st
-
-    raw = st.query_params.get(name, "")
-    if isinstance(raw, list):
-        raw = raw[0] if raw else ""
-    return str(raw).strip()
-
-
-def _slim_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
-    """Quita historial voluminoso para caber en la URL."""
-    slim = merge_with_defaults(bundle)
-    notif = dict(slim.get("notificaciones") or {})
-    notif["historial_enviados"] = []
-    slim["notificaciones"] = notif
-    return slim
-
-
 def encode_bundle_to_token(bundle: dict[str, Any]) -> str:
-    raw = json.dumps(_slim_bundle(bundle), separators=(",", ":"), ensure_ascii=False).encode(
+    raw = json.dumps(merge_with_defaults(bundle), separators=(",", ":"), ensure_ascii=False).encode(
         "utf-8"
     )
     token = base64.urlsafe_b64encode(gzip.compress(raw, compresslevel=9)).decode("ascii")
@@ -168,24 +140,24 @@ def decode_token_to_bundle(token: str) -> dict[str, Any] | None:
     return merge_with_defaults(parsed)
 
 
-def ensure_device_id() -> str:
-    import streamlit as st
-
-    existing = st.session_state.get(_SESSION_DEVICE)
-    if isinstance(existing, str) and _valid_device_id(existing):
-        if _qp_get(_DEVICE_PARAM).lower() != existing:
-            st.query_params[_DEVICE_PARAM] = existing
-        return existing
-
-    from_url = _qp_get(_DEVICE_PARAM).lower()
-    device_id = from_url if _valid_device_id(from_url) else uuid.uuid4().hex
-    st.session_state[_SESSION_DEVICE] = device_id
-    if _qp_get(_DEVICE_PARAM).lower() != device_id:
-        st.query_params[_DEVICE_PARAM] = device_id
-    return device_id
+def _save_device_file(device_id: str, bundle: dict[str, Any]) -> None:
+    if not device_id:
+        return
+    try:
+        path = _device_path(device_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = merge_with_defaults(bundle)
+        tmp = path.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        tmp.replace(path)
+    except OSError:
+        pass
 
 
 def _load_device_file(device_id: str) -> dict[str, Any] | None:
+    if not device_id:
+        return None
     path = _device_path(device_id)
     if not path.exists():
         return None
@@ -199,72 +171,32 @@ def _load_device_file(device_id: str) -> dict[str, Any] | None:
     return merge_with_defaults(raw)
 
 
-def _save_device_file(device_id: str, bundle: dict[str, Any]) -> None:
-    """Caché local opcional; en Cloud puede borrarse al dormir la app."""
-    try:
-        path = _device_path(device_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = merge_with_defaults(bundle)
-        tmp = path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        tmp.replace(path)
-    except OSError:
-        pass
-
-
-def _sync_state_to_url(bundle: dict[str, Any]) -> bool:
-    """Escribe ?s= en la URL. True si cupo; False si es demasiado grande."""
+def ensure_device_id() -> str:
     import streamlit as st
 
-    token = encode_bundle_to_token(bundle)
-    if len(token) > _MAX_STATE_CHARS:
-        st.session_state[_SESSION_URL_WARN] = (
-            "Tus datos son demasiado grandes para guardar en el enlace. "
-            "Exporta un ZIP desde Ayuda como respaldo."
-        )
-        return False
+    existing = st.session_state.get(_SESSION_DEVICE)
+    if isinstance(existing, str) and len(existing) == 32:
+        return existing
 
-    st.session_state.pop(_SESSION_URL_WARN, None)
-    if _qp_get(_STATE_PARAM) != token:
-        st.query_params[_STATE_PARAM] = token
-    return True
+    bundle = st.session_state.get(_SESSION_BUNDLE)
+    if isinstance(bundle, dict):
+        did = bundle.get("device_id")
+        if isinstance(did, str) and len(did) == 32:
+            st.session_state[_SESSION_DEVICE] = did
+            return did
 
-
-def current_bookmark_url() -> str:
-    """URL completa recomendada para favoritos (si el navegador la expone)."""
-    import streamlit as st
-
-    try:
-        # Disponible en versiones recientes de Streamlit
-        from urllib.parse import urlencode
-
-        base = ""
-        if hasattr(st, "context") and getattr(st.context, "headers", None):
-            host = st.context.headers.get("Host") or st.context.headers.get("host")
-            proto = st.context.headers.get("X-Forwarded-Proto") or "https"
-            if host:
-                base = f"{proto}://{host}/"
-        params = {}
-        ti = _qp_get(_DEVICE_PARAM)
-        s = _qp_get(_STATE_PARAM)
-        if ti:
-            params[_DEVICE_PARAM] = ti
-        if s:
-            params[_STATE_PARAM] = s
-        if base and params:
-            return base + "?" + urlencode(params)
-    except Exception:
-        pass
-    return ""
-
-
-def has_url_state() -> bool:
-    return bool(_qp_get(_STATE_PARAM))
+    device_id = uuid.uuid4().hex
+    st.session_state[_SESSION_DEVICE] = device_id
+    return device_id
 
 
 def hydrate_from_localstorage() -> None:
-    """Carga el bundle desde ?s= (prioridad) o archivo local de respaldo."""
+    """
+    Carga el bundle desde localStorage (PWA) o marca listo en modo Lab.
+
+    El componente JS puede devolver None en el primer tick; Streamlit re-ejecuta
+    cuando llega el valor. No usa ni reescribe la URL de la app.
+    """
     import streamlit as st
 
     if not use_browser_storage():
@@ -274,22 +206,42 @@ def hydrate_from_localstorage() -> None:
     if st.session_state.get(_SESSION_HYDRATED):
         return
 
-    device_id = ensure_device_id()
-    from_url = decode_token_to_bundle(_qp_get(_STATE_PARAM))
-    from_file = _load_device_file(device_id)
+    from app.components.ti_storage import STORAGE_KEY_BUNDLE, ls_get
 
-    if from_url is not None:
-        bundle = from_url
-    elif from_file is not None:
-        bundle = from_file
-        # Recupera a la URL para que el favorito futuro sí persista
-        _sync_state_to_url(bundle)
+    raw = ls_get(STORAGE_KEY_BUNDLE, widget_key="ti_ls_hydrate_get")
+
+    # Primer tick: el componente aún no devolvió valor (None ≠ storage vacío).
+    if raw is None:
+        return
+
+    bundle: dict[str, Any]
+    if isinstance(raw, str) and raw.strip():
+        # Preferir JSON directo; aceptar token gzip legado
+        try:
+            parsed = json.loads(raw)
+            bundle = merge_with_defaults(parsed if isinstance(parsed, dict) else None)
+        except (json.JSONDecodeError, TypeError):
+            decoded = decode_token_to_bundle(raw)
+            bundle = decoded if decoded is not None else empty_bundle()
     else:
         bundle = empty_bundle()
 
+    if not bundle.get("device_id"):
+        bundle["device_id"] = uuid.uuid4().hex
+
+    st.session_state[_SESSION_DEVICE] = bundle["device_id"]
     st.session_state[_SESSION_BUNDLE] = bundle
     st.session_state[_SESSION_HYDRATED] = True
-    _save_device_file(device_id, bundle)
+    _save_device_file(bundle["device_id"], bundle)
+
+
+def storage_ready() -> bool:
+    """True cuando ya se hidrató (Lab siempre True tras hydrate)."""
+    import streamlit as st
+
+    if not use_browser_storage():
+        return True
+    return bool(st.session_state.get(_SESSION_HYDRATED))
 
 
 def get_bundle() -> dict[str, Any]:
@@ -304,7 +256,10 @@ def replace_bundle(bundle: dict[str, Any]) -> None:
     import streamlit as st
 
     merged = merge_with_defaults(bundle)
+    if not merged.get("device_id"):
+        merged["device_id"] = ensure_device_id()
     st.session_state[_SESSION_BUNDLE] = merged
+    st.session_state[_SESSION_DEVICE] = merged["device_id"]
     flush_bundle_to_localstorage(merged)
 
 
@@ -318,14 +273,26 @@ def set_section(section: str, data: Any) -> None:
 
 
 def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
-    """Persiste en la URL (?s=) y en caché de archivo."""
+    """Persiste en localStorage del origen PWA (+ caché opcional en disco)."""
+    import streamlit as st
+
     if not use_browser_storage():
         return
 
-    device_id = ensure_device_id()
-    payload_obj = bundle if bundle is not None else get_bundle()
-    _sync_state_to_url(payload_obj)
+    payload_obj = merge_with_defaults(bundle if bundle is not None else get_bundle())
+    if not payload_obj.get("device_id"):
+        payload_obj["device_id"] = ensure_device_id()
+        st.session_state[_SESSION_BUNDLE] = payload_obj
+
+    device_id = str(payload_obj.get("device_id") or ensure_device_id())
     _save_device_file(device_id, payload_obj)
+
+    from app.components.ti_storage import STORAGE_KEY_BUNDLE, ls_set
+
+    seq = int(st.session_state.get(_SESSION_LS_FLUSH, 0)) + 1
+    st.session_state[_SESSION_LS_FLUSH] = seq
+    raw = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":"))
+    ls_set(STORAGE_KEY_BUNDLE, raw, widget_key=f"ti_ls_flush_{seq}")
 
 
 def read_tarjetas() -> list[dict[str, Any]]:
@@ -355,13 +322,15 @@ def write_consumos(data: list[dict[str, Any]]) -> None:
 def read_config() -> dict[str, Any]:
     cfg = get_bundle().get("config")
     if not isinstance(cfg, dict):
-        return {"pin_hash": "", "pin_salt": "", "idioma": "es"}
+        return {"pin_hash": "", "pin_salt": "", "idioma": "es", "pin_configurado": False}
     return dict(cfg)
 
 
 def write_config(config: dict[str, Any]) -> None:
     current = read_config()
     current.update(config)
+    if current.get("pin_hash") and current.get("pin_salt"):
+        current["pin_configurado"] = True
     set_section("config", current)
 
 
@@ -381,3 +350,16 @@ def write_notificaciones(config: dict[str, Any]) -> None:
     if not isinstance(merged.get("historial_enviados"), list):
         merged["historial_enviados"] = []
     set_section("notificaciones", merged)
+
+
+# --- Compat: APIs antiguas basadas en URL (no-ops / False) ---
+
+
+def has_url_state() -> bool:
+    """Deprecado: la PWA ya no guarda estado en la URL."""
+    return False
+
+
+def current_bookmark_url() -> str:
+    """Deprecado: dominio fijo de la PWA; no se reescribe la URL."""
+    return ""

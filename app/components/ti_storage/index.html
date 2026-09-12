@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>TI localStorage</title>
+  </head>
+  <body>
+    <script>
+      /* Bridge mínimo Streamlit custom component (sin CDN). */
+      (function () {
+        const Streamlit = {
+          setComponentReady: function () {
+            window.parent.postMessage(
+              { isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 },
+              "*"
+            );
+          },
+          setFrameHeight: function (height) {
+            window.parent.postMessage(
+              { isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: height },
+              "*"
+            );
+          },
+          setComponentValue: function (value) {
+            window.parent.postMessage(
+              { isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value },
+              "*"
+            );
+          },
+          RENDER_EVENT: "streamlit:render",
+          events: {
+            addEventListener: function (type, callback) {
+              window.addEventListener("message", function (event) {
+                if (event.data && event.data.type === type) {
+                  callback({ detail: event.data });
+                }
+              });
+            },
+          },
+        };
+
+        function store() {
+          try {
+            return window.parent.localStorage;
+          } catch (e) {
+            return window.localStorage;
+          }
+        }
+
+        function onRender(event) {
+          const args = (event.detail && event.detail.args) || {};
+          const key = args.storage_key || "ti_app_v1";
+          const mode = args.mode || "get";
+          const ls = store();
+
+          try {
+            if (mode === "get") {
+              // "" = sin datos (distinto de null = componente aún no listo en Python)
+              const v = ls.getItem(key);
+              Streamlit.setComponentValue(v === null ? "" : v);
+            } else if (mode === "set") {
+              const val = args.value;
+              if (val === null || val === undefined || val === "") {
+                ls.removeItem(key);
+              } else {
+                ls.setItem(key, String(val));
+              }
+              Streamlit.setComponentValue(true);
+            } else {
+              Streamlit.setComponentValue(null);
+            }
+          } catch (err) {
+            console.warn("TI localStorage bridge error", err);
+            Streamlit.setComponentValue(mode === "set" ? false : null);
+          }
+          Streamlit.setFrameHeight(0);
+        }
+
+        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+        Streamlit.setComponentReady();
+        Streamlit.setFrameHeight(0);
+      })();
+    </script>
+  </body>
+</html>
