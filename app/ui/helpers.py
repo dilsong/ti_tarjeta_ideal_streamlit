@@ -445,8 +445,6 @@ def render_licencia_expirada() -> None:
 
 def render_pin_gate(on_unlock) -> None:
     """Crear PIN (solo si no existe en storage) o ingresar PIN para autenticar."""
-    # Si el móvil NO muestra esta línea, Render no desplegó el commit nuevo.
-    st.caption("TI build c84d2f5+")
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)
@@ -459,6 +457,8 @@ def render_pin_gate(on_unlock) -> None:
 
 
 def _render_crear_pin(on_unlock) -> None:
+    from app.components.ti_loader import ti_spinner
+
     st.title("💳 " + t("pantalla_pin.crear_titulo"))
     st.info(t("pantalla_pin.crear_subtitulo"))
 
@@ -479,15 +479,20 @@ def _render_crear_pin(on_unlock) -> None:
         if st.button(t("pantalla_pin.boton_crear"), key="pin_create", type="primary", use_container_width=True):
             if pin2 != st.session_state.get("pin_temp", ""):
                 error.error(t("pantalla_pin.error_pin_no_coincide"))
-            elif crear_pin(pin2):
-                st.session_state.pop("pin_step", None)
-                st.session_state.pop("pin_temp", None)
-                on_unlock()
             else:
-                error.error(t("pantalla_pin.error_pin_corto"))
+                with ti_spinner("Creando PIN de seguridad…"):
+                    ok = crear_pin(pin2)
+                if ok:
+                    st.session_state.pop("pin_step", None)
+                    st.session_state.pop("pin_temp", None)
+                    on_unlock()
+                else:
+                    error.error(t("pantalla_pin.error_pin_corto"))
 
 
 def _render_desbloquear(on_unlock) -> None:
+    from app.components.ti_loader import ti_spinner
+
     st.title("🔐 " + t("pantalla_pin.desbloquear_titulo"))
     st.info(t("pantalla_pin.desbloquear_subtitulo"))
 
@@ -495,7 +500,9 @@ def _render_desbloquear(on_unlock) -> None:
     pin = pin_input(t("pantalla_pin.pin"), "unlock_pin")
 
     if st.button(t("pantalla_pin.boton_desbloquear"), key="unlock", type="primary", use_container_width=True):
-        if verificar_pin(pin):
+        with ti_spinner("Validando PIN…"):
+            ok = verificar_pin(pin)
+        if ok:
             on_unlock()
         else:
             error.error(t("pantalla_pin.error_pin_incorrecto"))

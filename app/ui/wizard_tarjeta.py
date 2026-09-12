@@ -235,16 +235,19 @@ def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
             disabled=not puede,
             key=f"{prefix}_ocr_p1_analizar",
         ):
+            from app.components.ti_loader import ti_spinner
+
             if archivos_subidos and any(_es_pdf_upload(f) for f in archivos_subidos) and not pdf_disponible():
                 st.error(t("wizard_tarjeta.ocr_pdf_no_disponible"))
             if archivos_subidos and any(not _es_pdf_upload(f) for f in archivos_subidos) and not hay_ocr:
                 st.warning(t("pantalla_registrar_tarjeta.ocr_no_disponible_pegar"))
 
-            datos, imagenes, pdfs = _procesar_archivos_subidos(
-                archivos_subidos,
-                texto_manual or "",
-                usar_ocr_imagenes=hay_ocr,
-            )
+            with ti_spinner("Leyendo reglas del banco…"):
+                datos, imagenes, pdfs = _procesar_archivos_subidos(
+                    archivos_subidos,
+                    texto_manual or "",
+                    usar_ocr_imagenes=hay_ocr,
+                )
             st.session_state[ocr_k] = datos.to_dict()
 
             if not datos.texto_crudo.strip() and not (texto_manual or "").strip() and not imagenes and not pdfs:
@@ -324,14 +327,18 @@ def _render_ocr_bloque(
             disabled=not puede,
             key=f"{prefix}_ocr_p{paso}_analizar",
         ):
+            from app.components.ti_loader import ti_spinner
+
             imagen = None
             if capturas:
                 imagen = _abrir_imagen_upload(capturas[0])
+            with ti_spinner("Leyendo saldos del banco…"):
+                if imagen is not None and not hay_ocr and not (texto_manual or "").strip():
+                    datos = procesar_fn(None, texto_manual or "")
+                else:
+                    datos = procesar_fn(imagen if hay_ocr else None, texto_manual or "")
             if imagen is not None and not hay_ocr and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
-                datos = procesar_fn(None, texto_manual or "")
-            else:
-                datos = procesar_fn(imagen if hay_ocr else None, texto_manual or "")
             st.session_state[ocr_k] = datos.to_dict()
             if not datos.texto_crudo.strip() and imagen is None and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))

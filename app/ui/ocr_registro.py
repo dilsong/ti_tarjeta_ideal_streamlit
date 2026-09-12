@@ -314,6 +314,8 @@ def _render_ocr_formulario(
             st.rerun()
 
         if analizar:
+            from app.components.ti_loader import ti_spinner
+
             _borrar(_k(prefix, "datos"), _k(prefix, "texto_visto"), _k(prefix, "prefill"))
             imagen = None
             if captura:
@@ -326,7 +328,8 @@ def _render_ocr_formulario(
                         break
                     except Exception:
                         imagen = None
-            datos = procesar_imagen_y_texto(imagen, texto_manual or "")
+            with ti_spinner("Leyendo e interpretando…"):
+                datos = procesar_imagen_y_texto(imagen, texto_manual or "")
             st.session_state[_k(prefix, "datos")] = datos.to_dict()
             st.session_state[_k(prefix, "texto_visto")] = datos.texto_crudo
             if captura and not hay_ocr and not (texto_manual or "").strip():
