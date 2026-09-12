@@ -194,33 +194,21 @@ def _procesar_archivos_subidos(
 
 
 def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
-    """
-    Paso 1 — expander con file_uploader OBLIGATORIO como primer control,
-    luego caja de texto opcional. No se oculta aunque falte Tesseract.
-    """
+    """Paso 1: expander con file_uploader fijo (sin if) + text_area."""
     ocr_k = _ocr_key(prefix, 1)
 
-    with st.expander(t("wizard_tarjeta.ocr_p1_titulo"), expanded=True):
-        # 1. Botón para subir PDF o imágenes — PRIMERO (antes de cualquier otra lógica)
+    with st.expander("Leer estado de cuenta (Paso 1)", expanded=True):
+        # --- INICIO: st.file_uploader OBLIGATORIO (sin condición if) ---
         archivos_subidos = st.file_uploader(
-            "Selecciona o arrastra tu PDF / fotos del estado de cuenta",
+            "Sube aquí tu PDF o imágenes del estado de cuenta",
             type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
-            key=f"{prefix}_uploader_paso1",
+            key="uploader_paso1_fijo",
         )
+        # --- FIN file_uploader ---
         archivos_subidos = list(archivos_subidos or [])
 
         if archivos_subidos:
-            n_pdf = sum(1 for f in archivos_subidos if _es_pdf_upload(f))
-            n_img = len(archivos_subidos) - n_pdf
-            st.caption(
-                t(
-                    "wizard_tarjeta.ocr_multi_resumen",
-                    n=len(archivos_subidos),
-                    imgs=n_img,
-                    pdfs=n_pdf,
-                )
-            )
             for archivo in archivos_subidos:
                 if _es_pdf_upload(archivo):
                     st.caption(f"📄 {archivo.name}")
@@ -229,7 +217,6 @@ def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
                     if img is not None:
                         st.image(img, use_container_width=True, caption=archivo.name)
 
-        # 2. Caja para pegar texto (opcional)
         texto_manual = st.text_area(
             "O pega aquí el texto del estado de cuenta",
             height=90,

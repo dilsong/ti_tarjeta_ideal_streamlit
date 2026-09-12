@@ -258,14 +258,21 @@ def _render_ocr_formulario(
             st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_con_foto"))
             captura = st.file_uploader(
                 t("pantalla_registrar_tarjeta.ocr_uploader"),
-                type=["png", "jpg", "jpeg", "webp"],
+                type=["png", "jpg", "jpeg", "webp", "pdf"],
+                accept_multiple_files=True,
                 key=_k(prefix, "upload"),
             )
             if captura:
-                try:
-                    st.image(Image.open(BytesIO(captura.getvalue())), use_container_width=True)
-                except Exception:
-                    st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
+                # accept_multiple_files → lista
+                items = captura if isinstance(captura, list) else [captura]
+                for item in items[:3]:
+                    try:
+                        if (item.type or "").endswith("pdf") or (item.name or "").lower().endswith(".pdf"):
+                            st.caption(f"📄 {item.name}")
+                        else:
+                            st.image(Image.open(BytesIO(item.getvalue())), use_container_width=True)
+                    except Exception:
+                        st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
             texto_manual = st.text_area(
                 t("pantalla_registrar_tarjeta.ocr_texto_manual"),
                 height=100,
@@ -273,7 +280,14 @@ def _render_ocr_formulario(
                 placeholder=t("pantalla_registrar_tarjeta.ocr_texto_placeholder"),
             )
         else:
+            # Siempre mostrar uploader aunque Tesseract no esté (PDF / pegar texto)
             st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
+            captura = st.file_uploader(
+                "Sube aquí tu PDF o imágenes del estado de cuenta",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=_k(prefix, "upload_sin_ocr"),
+            )
             texto_manual = st.text_area(
                 t("pantalla_registrar_tarjeta.ocr_texto_manual_solo"),
                 height=120,
@@ -303,10 +317,15 @@ def _render_ocr_formulario(
             _borrar(_k(prefix, "datos"), _k(prefix, "texto_visto"), _k(prefix, "prefill"))
             imagen = None
             if captura:
-                try:
-                    imagen = Image.open(BytesIO(captura.getvalue()))
-                except Exception:
-                    imagen = None
+                items = captura if isinstance(captura, list) else [captura]
+                for item in items:
+                    try:
+                        if (item.type or "").endswith("pdf") or (item.name or "").lower().endswith(".pdf"):
+                            continue
+                        imagen = Image.open(BytesIO(item.getvalue()))
+                        break
+                    except Exception:
+                        imagen = None
             datos = procesar_imagen_y_texto(imagen, texto_manual or "")
             st.session_state[_k(prefix, "datos")] = datos.to_dict()
             st.session_state[_k(prefix, "texto_visto")] = datos.texto_crudo
