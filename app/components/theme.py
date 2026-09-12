@@ -154,22 +154,47 @@ MOBILE_CSS = """
         display: none !important;
     }
 
-    /* File uploader — visible y usable en móvil / PWA */
-    [data-testid="stFileUploader"] {
+    /* File uploader — siempre visible en móvil / PWA (no ocultar) */
+    [data-testid="stFileUploader"],
+    section[data-testid="stFileUploader"],
+    div[data-testid="stFileUploader"] {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
         width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
         margin: 0.5rem 0 0.75rem 0 !important;
+        overflow: visible !important;
     }
-    [data-testid="stFileUploaderDropzone"] {
-        min-height: 4.5rem !important;
+    [data-testid="stFileUploaderDropzone"],
+    section[data-testid="stFileUploaderDropzone"] {
+        display: flex !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        min-height: 5rem !important;
         padding: 0.85rem !important;
-        border: 1.5px dashed #64748B !important;
+        border: 1.5px dashed #93C5FD !important;
         border-radius: 12px !important;
         background: #1E293B !important;
     }
     [data-testid="stFileUploaderDropzone"] * {
-        color: #E2E8F0 !important;
+        color: #F8FAFC !important;
     }
-    [data-testid="stFileUploaderDropzoneInstructions"] span {
+    [data-testid="stFileUploaderDropzone"] button,
+    [data-testid="stFileUploaderDropzone"] [data-testid="baseButton-secondary"] {
+        display: inline-flex !important;
+        visibility: visible !important;
+        background: #2563EB !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"],
+    [data-testid="stFileUploaderDropzoneInstructions"] span,
+    [data-testid="stFileUploaderDropzoneInstructions"] small {
+        display: block !important;
+        visibility: visible !important;
+        color: #E2E8F0 !important;
         font-size: 0.9rem !important;
     }
 
