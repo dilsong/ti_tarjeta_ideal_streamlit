@@ -27,7 +27,7 @@
   "pantalla_pin": {
     "crear_titulo": "Crear PIN de Seguridad",
     "crear_subtitulo": "Elige un PIN de 4 a 6 dígitos. Se guardará en este dispositivo; solo lo crearás una vez.",
-    "desbloquear_titulo": "Ingrese su PIN",
+    "desbloquear_titulo": "Ingresa tu PIN",
     "desbloquear_subtitulo": "Ingresa tu PIN para desbloquear TI App.",
     "pin": "PIN (4 a 6 dígitos)",
     "confirmar_pin": "Confirmar PIN",

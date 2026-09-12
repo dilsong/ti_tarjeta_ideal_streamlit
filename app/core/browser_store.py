@@ -1,11 +1,11 @@
 """
-Persistencia monousuario (PWA con dominio fijo).
+Persistencia 100% cliente (PWA / Render).
 
-- Lab: TI_USE_FILESYSTEM=1 → app/data/*.json
-- PWA / Render: localStorage del origen (sin ?ti= / &s= en la URL)
+Arquitectura:
+- Hosted (Render / Streamlit Cloud): SIEMPRE localStorage del dispositivo.
+- Lab local: solo si TI_USE_FILESYSTEM=1 usa app/data/*.json.
 
-El PIN vive en el bundle (config.pin_hash / pin_salt) dentro de localStorage.
-st.session_state['autenticado'] es solo de sesión: al recargar pide PIN, nunca recrearlo.
+PIN y tarjetas viven en el navegador; un redeploy de Render no los borra.
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ import json
 import os
 import uuid
 from copy import deepcopy
-from pathlib import Path
 from typing import Any
 
 _SESSION_BUNDLE = "ti_local_bundle"
 _SESSION_HYDRATED = "ti_local_hydrated"
 _SESSION_DEVICE = "ti_device_id"
 _SESSION_LS_FLUSH = "ti_ls_flush_seq"
+_SESSION_PIN_FLAG = "ti_pin_created_flag"
 
 _DEFAULT_NOTIF: dict[str, Any] = {
     "notificar_dia_corte": True,
@@ -48,15 +48,22 @@ def _is_render() -> bool:
     return bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
 
 
+def is_hosted_environment() -> bool:
+    """Render / Cloud: disco efímero → nunca usar app/data para el usuario."""
+    return _is_render() or _is_streamlit_cloud()
+
+
 def use_browser_storage() -> bool:
-    """True = localStorage PWA. False = app/data compartido (Lab)."""
+    """
+    True = localStorage del dispositivo.
+    En Render/Cloud siempre True (ignora TI_USE_FILESYSTEM=1).
+    Lab local: TI_USE_FILESYSTEM=1 → archivos; en caso contrario → localStorage.
+    """
+    if is_hosted_environment():
+        return True
     flag = os.environ.get("TI_USE_FILESYSTEM", "").strip().lower()
     if flag in ("1", "true", "yes", "on"):
         return False
-    if flag in ("0", "false", "no", "off"):
-        return True
-    if _is_streamlit_cloud() or _is_render():
-        return True
     return True
 
 
@@ -89,7 +96,6 @@ def merge_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(cfg, dict):
         merged_cfg = dict(base["config"])
         merged_cfg.update(cfg)
-        # Marca explícita o implícita si ya hay hash
         if merged_cfg.get("pin_hash") and merged_cfg.get("pin_salt"):
             merged_cfg["pin_configurado"] = True
         base["config"] = merged_cfg
@@ -103,19 +109,6 @@ def merge_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(raw.get("device_id"), str) and raw["device_id"]:
         base["device_id"] = raw["device_id"]
     return base
-
-
-def _devices_dir() -> Path:
-    if _is_streamlit_cloud():
-        base = Path("/tmp/ti_tarjeta_ideal_devices")
-    else:
-        base = Path(__file__).resolve().parent.parent / "data" / "devices"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
-
-
-def _device_path(device_id: str) -> Path:
-    return _devices_dir() / f"{device_id}.json"
 
 
 def encode_bundle_to_token(bundle: dict[str, Any]) -> str:
@@ -140,37 +133,6 @@ def decode_token_to_bundle(token: str) -> dict[str, Any] | None:
     return merge_with_defaults(parsed)
 
 
-def _save_device_file(device_id: str, bundle: dict[str, Any]) -> None:
-    if not device_id:
-        return
-    try:
-        path = _device_path(device_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = merge_with_defaults(bundle)
-        tmp = path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        tmp.replace(path)
-    except OSError:
-        pass
-
-
-def _load_device_file(device_id: str) -> dict[str, Any] | None:
-    if not device_id:
-        return None
-    path = _device_path(device_id)
-    if not path.exists():
-        return None
-    try:
-        with path.open(encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
-    return merge_with_defaults(raw)
-
-
 def ensure_device_id() -> str:
     import streamlit as st
 
@@ -190,12 +152,53 @@ def ensure_device_id() -> str:
     return device_id
 
 
+def _parse_bundle_raw(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return merge_with_defaults(parsed if isinstance(parsed, dict) else None)
+        except (json.JSONDecodeError, TypeError):
+            decoded = decode_token_to_bundle(raw)
+            return decoded if decoded is not None else empty_bundle()
+    return empty_bundle()
+
+
+def _parse_auth_raw(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    if data.get("pin_hash"):
+        out["pin_hash"] = str(data["pin_hash"])
+    if data.get("pin_salt"):
+        out["pin_salt"] = str(data["pin_salt"])
+    return out
+
+
+def _apply_auth_into_bundle(bundle: dict[str, Any], auth: dict[str, str], pin_created: bool) -> dict[str, Any]:
+    cfg = dict(bundle.get("config") or {})
+    if auth.get("pin_hash") and auth.get("pin_salt"):
+        cfg["pin_hash"] = auth["pin_hash"]
+        cfg["pin_salt"] = auth["pin_salt"]
+        cfg["pin_configurado"] = True
+    elif pin_created and cfg.get("pin_hash") and cfg.get("pin_salt"):
+        cfg["pin_configurado"] = True
+    elif pin_created:
+        # Bandera presente: no pedir crear PIN otra vez aunque falte hash (caso raro).
+        cfg["pin_configurado"] = True
+    bundle["config"] = cfg
+    return bundle
+
+
 def hydrate_from_localstorage() -> None:
     """
-    Carga el bundle desde localStorage (PWA) o marca listo en modo Lab.
-
-    El componente JS puede devolver None en el primer tick; Streamlit re-ejecuta
-    cuando llega el valor. No usa ni reescribe la URL de la app.
+    Carga bundle + auth desde localStorage del dispositivo.
+    Tres lecturas en paralelo (mismo tick de componentes).
     """
     import streamlit as st
 
@@ -206,42 +209,56 @@ def hydrate_from_localstorage() -> None:
     if st.session_state.get(_SESSION_HYDRATED):
         return
 
-    from app.components.ti_storage import STORAGE_KEY_BUNDLE, ls_get
+    from app.components.ti_storage import (
+        STORAGE_KEY_AUTH,
+        STORAGE_KEY_BUNDLE,
+        STORAGE_KEY_PIN_CREATED,
+        ls_get,
+    )
 
-    raw = ls_get(STORAGE_KEY_BUNDLE, widget_key="ti_ls_hydrate_get")
+    raw_bundle = ls_get(STORAGE_KEY_BUNDLE, widget_key="ti_ls_hydrate_bundle")
+    raw_auth = ls_get(STORAGE_KEY_AUTH, widget_key="ti_ls_hydrate_auth")
+    raw_flag = ls_get(STORAGE_KEY_PIN_CREATED, widget_key="ti_ls_hydrate_pin_flag")
 
-    # Primer tick: el componente aún no devolvió valor (None ≠ storage vacío).
-    if raw is None:
+    # Esperar a que los tres componentes contesten (None = aún no listo).
+    if raw_bundle is None or raw_auth is None or raw_flag is None:
         return
 
-    bundle: dict[str, Any]
-    if isinstance(raw, str) and raw.strip():
-        # Preferir JSON directo; aceptar token gzip legado
-        try:
-            parsed = json.loads(raw)
-            bundle = merge_with_defaults(parsed if isinstance(parsed, dict) else None)
-        except (json.JSONDecodeError, TypeError):
-            decoded = decode_token_to_bundle(raw)
-            bundle = decoded if decoded is not None else empty_bundle()
-    else:
-        bundle = empty_bundle()
+    bundle = _parse_bundle_raw(raw_bundle)
+    auth = _parse_auth_raw(raw_auth)
+    pin_created = str(raw_flag).strip() in ("1", "true", "yes", "on")
+    if auth.get("pin_hash") and auth.get("pin_salt"):
+        pin_created = True
+
+    bundle = _apply_auth_into_bundle(bundle, auth, pin_created)
 
     if not bundle.get("device_id"):
         bundle["device_id"] = uuid.uuid4().hex
 
     st.session_state[_SESSION_DEVICE] = bundle["device_id"]
     st.session_state[_SESSION_BUNDLE] = bundle
+    st.session_state[_SESSION_PIN_FLAG] = bool(
+        pin_created or (bundle.get("config") or {}).get("pin_configurado")
+    )
     st.session_state[_SESSION_HYDRATED] = True
-    _save_device_file(bundle["device_id"], bundle)
 
 
 def storage_ready() -> bool:
-    """True cuando ya se hidrató (Lab siempre True tras hydrate)."""
     import streamlit as st
 
     if not use_browser_storage():
         return True
     return bool(st.session_state.get(_SESSION_HYDRATED))
+
+
+def pin_flag_from_client() -> bool:
+    """True si el dispositivo ya creó PIN (localStorage / sesión hidratada)."""
+    import streamlit as st
+
+    if st.session_state.get(_SESSION_PIN_FLAG):
+        return True
+    cfg = read_config()
+    return bool(cfg.get("pin_configurado") and cfg.get("pin_hash") and cfg.get("pin_salt"))
 
 
 def get_bundle() -> dict[str, Any]:
@@ -272,8 +289,36 @@ def set_section(section: str, data: Any) -> None:
     flush_bundle_to_localstorage(bundle)
 
 
+def persist_auth_keys(config: dict[str, Any]) -> None:
+    """Escribe ti_pin_created + ti_app_auth_v1 en localStorage (doble vía)."""
+    import streamlit as st
+
+    from app.components.ti_storage import (
+        STORAGE_KEY_AUTH,
+        STORAGE_KEY_PIN_CREATED,
+        inject_ls_write,
+        ls_set,
+    )
+
+    pin_hash = str(config.get("pin_hash") or "")
+    pin_salt = str(config.get("pin_salt") or "")
+    if not (pin_hash and pin_salt):
+        return
+
+    st.session_state[_SESSION_PIN_FLAG] = True
+    auth_json = json.dumps(
+        {"pin_hash": pin_hash, "pin_salt": pin_salt, "pin_configurado": True},
+        separators=(",", ":"),
+    )
+    seq = int(st.session_state.get(_SESSION_LS_FLUSH, 0))
+    ls_set(STORAGE_KEY_PIN_CREATED, "1", widget_key=f"ti_ls_pin_flag_{seq}")
+    ls_set(STORAGE_KEY_AUTH, auth_json, widget_key=f"ti_ls_auth_{seq}")
+    inject_ls_write(STORAGE_KEY_PIN_CREATED, "1")
+    inject_ls_write(STORAGE_KEY_AUTH, auth_json)
+
+
 def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
-    """Persiste en localStorage del origen PWA (+ caché opcional en disco)."""
+    """Persiste bundle (+ auth si hay PIN) en localStorage del dispositivo."""
     import streamlit as st
 
     if not use_browser_storage():
@@ -284,15 +329,17 @@ def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
         payload_obj["device_id"] = ensure_device_id()
         st.session_state[_SESSION_BUNDLE] = payload_obj
 
-    device_id = str(payload_obj.get("device_id") or ensure_device_id())
-    _save_device_file(device_id, payload_obj)
-
-    from app.components.ti_storage import STORAGE_KEY_BUNDLE, ls_set
+    from app.components.ti_storage import STORAGE_KEY_BUNDLE, inject_ls_write, ls_set
 
     seq = int(st.session_state.get(_SESSION_LS_FLUSH, 0)) + 1
     st.session_state[_SESSION_LS_FLUSH] = seq
     raw = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":"))
     ls_set(STORAGE_KEY_BUNDLE, raw, widget_key=f"ti_ls_flush_{seq}")
+    inject_ls_write(STORAGE_KEY_BUNDLE, raw)
+
+    cfg = payload_obj.get("config") or {}
+    if cfg.get("pin_hash") and cfg.get("pin_salt"):
+        persist_auth_keys(cfg)
 
 
 def read_tarjetas() -> list[dict[str, Any]]:
@@ -332,6 +379,8 @@ def write_config(config: dict[str, Any]) -> None:
     if current.get("pin_hash") and current.get("pin_salt"):
         current["pin_configurado"] = True
     set_section("config", current)
+    if use_browser_storage() and current.get("pin_hash") and current.get("pin_salt"):
+        persist_auth_keys(current)
 
 
 def read_notificaciones() -> dict[str, Any]:
@@ -352,14 +401,9 @@ def write_notificaciones(config: dict[str, Any]) -> None:
     set_section("notificaciones", merged)
 
 
-# --- Compat: APIs antiguas basadas en URL (no-ops / False) ---
-
-
 def has_url_state() -> bool:
-    """Deprecado: la PWA ya no guarda estado en la URL."""
     return False
 
 
 def current_bookmark_url() -> str:
-    """Deprecado: dominio fijo de la PWA; no se reescribe la URL."""
     return ""

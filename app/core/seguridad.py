@@ -1,9 +1,15 @@
 """
-Gestión del PIN local encriptado (monousuario / PWA).
+Gestión del PIN (monousuario / PWA).
 
-Persistencia: localStorage (PWA) o app/data/config.json (Lab).
-La sesión st.session_state['autenticado'] NO se persiste: al recargar pide PIN,
-pero nunca vuelve a pedir crearlo si ya está en storage.
+Producción (Render): PIN SOLO en localStorage del dispositivo
+  - ti_pin_created = "1"
+  - ti_app_auth_v1 = {pin_hash, pin_salt}
+  - ti_app_bundle_v1.config
+
+Lab local (TI_USE_FILESYSTEM=1, fuera de Render): app/data/config.json
+
+st.session_state['autenticado'] es solo de sesión (al recargar pide PIN),
+pero si ti_pin_created existe NUNCA vuelve a pedir crear el PIN.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ def _load_config() -> dict[str, Any]:
 def _save_config(config: dict[str, Any]) -> None:
     from app.core.browser_store import use_browser_storage, write_config
 
+    # En hosted / PWA siempre localStorage (write_config ya persiste auth keys).
     if use_browser_storage():
         write_config(config)
         return
@@ -56,7 +63,19 @@ def _hash_pin(pin: str, salt: bytes) -> str:
 
 
 def pin_configurado() -> bool:
-    """True si esta instancia ya tiene PIN en DB/localStorage (no depende de la URL)."""
+    """
+    True si el dispositivo ya tiene PIN.
+    Prioridad: bandera ti_pin_created / hash en localStorage hidratado.
+    Nunca depende del disco de Render.
+    """
+    from app.core.browser_store import pin_flag_from_client, use_browser_storage
+
+    if use_browser_storage():
+        if pin_flag_from_client():
+            return True
+        config = _load_config()
+        return bool(config.get("pin_hash") and config.get("pin_salt"))
+
     config = _load_config()
     if config.get("pin_configurado") and config.get("pin_hash") and config.get("pin_salt"):
         return True
@@ -64,7 +83,7 @@ def pin_configurado() -> bool:
 
 
 def crear_pin(pin: str) -> bool:
-    """Crea y persiste un PIN de 4–6 dígitos; marca la instancia como configurada."""
+    """Crea PIN y lo marca en localStorage (ti_pin_created + hash/salt)."""
     if not pin_valido(pin):
         return False
 
@@ -74,11 +93,19 @@ def crear_pin(pin: str) -> bool:
     config["pin_hash"] = _hash_pin(pin, salt)
     config["pin_configurado"] = True
     _save_config(config)
+
+    # Refuerzo explícito en el cliente (además de write_config).
+    from app.core.browser_store import use_browser_storage
+
+    if use_browser_storage():
+        from app.core.browser_store import persist_auth_keys
+
+        persist_auth_keys(config)
     return True
 
 
 def verificar_pin(pin: str) -> bool:
-    """Verifica el PIN contra el hash almacenado en storage."""
+    """Verifica el PIN contra el hash en storage del dispositivo."""
     if not pin_valido(pin):
         return False
     config = _load_config()
@@ -86,7 +113,10 @@ def verificar_pin(pin: str) -> bool:
     pin_hash = config.get("pin_hash", "")
     if not salt_hex or not pin_hash:
         return False
-    salt = bytes.fromhex(salt_hex)
+    try:
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        return False
     return _hash_pin(pin, salt) == pin_hash
 
 

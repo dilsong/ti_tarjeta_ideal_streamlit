@@ -14,8 +14,8 @@ services:
       --browser.gatherUsageStats=false
     healthCheckPath: /
     envVars:
-      # "0" = PIN y datos en localStorage del PWA (dominio fijo; sin ?ti=&s=)
-      # "1" = Lab con app/data/*.json (disco persistente)
+      # Render: SIEMPRE localStorage del dispositivo (este flag se ignora en hosted).
+      # Lab PC: "1" = app/data/*.json
       - key: TI_USE_FILESYSTEM
         value: "0"
       # Fin de la prueba (ISO). Tras esta fecha la app muestra bloqueo de licencia.

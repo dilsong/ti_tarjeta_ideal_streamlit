@@ -6,7 +6,7 @@
   </head>
   <body>
     <script>
-      /* Bridge mínimo Streamlit custom component (sin CDN). */
+      /* Bridge Streamlit ↔ localStorage del origen PWA (window.top). */
       (function () {
         const Streamlit = {
           setComponentReady: function () {
@@ -40,11 +40,21 @@
         };
 
         function store() {
-          try {
-            return window.parent.localStorage;
-          } catch (e) {
-            return window.localStorage;
+          // Preferir top: sobrevive redeploys de Render; el iframe del componente es efímero.
+          var candidates = [];
+          try { candidates.push(window.top); } catch (e) {}
+          try { candidates.push(window.parent); } catch (e) {}
+          candidates.push(window);
+          for (var i = 0; i < candidates.length; i++) {
+            try {
+              var ls = candidates[i].localStorage;
+              if (ls) {
+                ls.getItem("__ti_probe__");
+                return ls;
+              }
+            } catch (err) {}
           }
+          return null;
         }
 
         function onRender(event) {
@@ -54,8 +64,12 @@
           const ls = store();
 
           try {
+            if (!ls) {
+              Streamlit.setComponentValue(mode === "set" ? false : "");
+              Streamlit.setFrameHeight(0);
+              return;
+            }
             if (mode === "get") {
-              // "" = sin datos (distinto de null = componente aún no listo en Python)
               const v = ls.getItem(key);
               Streamlit.setComponentValue(v === null ? "" : v);
             } else if (mode === "set") {
@@ -71,7 +85,7 @@
             }
           } catch (err) {
             console.warn("TI localStorage bridge error", err);
-            Streamlit.setComponentValue(mode === "set" ? false : null);
+            Streamlit.setComponentValue(mode === "set" ? false : "");
           }
           Streamlit.setFrameHeight(0);
         }
