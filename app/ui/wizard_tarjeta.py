@@ -434,7 +434,7 @@ def _render_ocr_bloque(
                 st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
 
         if not hay_ocr:
-            st.caption(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
+            st.warning(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
 
         texto_manual = st.text_area(
             t("pantalla_registrar_tarjeta.ocr_texto_manual"),

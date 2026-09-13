@@ -1,7 +1,7 @@
 """
 OCR de capturas / estados de cuenta para TI (Streamlit).
 
-Usa pytesseract + Tesseract del sistema (packages.txt en Cloud).
+Usa pytesseract + Tesseract del sistema (Dockerfile en Render; packages.txt en Streamlit Cloud).
 La foto es la vía preferida; pegar texto es respaldo si OCR no está o falla.
 """
 
@@ -429,6 +429,37 @@ def _monto_en_lineas(
     return None
 
 
+def _monto_antes_de_etiqueta(texto: str, etiqueta_re: str) -> float | None:
+    """
+    Capital One (y similares): el monto aparece ENCIMA de la etiqueta.
+
+    Ej. ``$730.00\\nSaldo actual`` o ``$291.33 Saldo actual``.
+    """
+    if not texto or not etiqueta_re:
+        return None
+    # Monto en línea previa (o separado por espacios) + etiqueta
+    pat_bloque = rf"\$?\s*{_MONTO}\s*(?:\n|\r\n|\s)+{etiqueta_re}\b"
+    # Misma línea: $X.XX … etiqueta
+    pat_misma = rf"\$?\s*{_MONTO}\s+{etiqueta_re}\b"
+    for pat in (pat_bloque, pat_misma):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if not m:
+            continue
+        try:
+            val = _float_es(m)
+        except ValueError:
+            continue
+        tiene_decimal = "." in m.group(1) or "," in m.group(1)
+        if val == 0 and ("$" in m.group(0) or tiene_decimal):
+            return 0.0
+        if val <= 31 and "$" not in m.group(0) and not tiene_decimal:
+            continue
+        if val >= 1900 and val <= 2100:
+            continue
+        return val
+    return None
+
+
 def _limpiar_texto_ocr(texto: str) -> str:
     """Normaliza errores típicos de OCR en inglés y español (independiente del idioma de la UI)."""
     t = texto.replace("\u00a0", " ")
@@ -558,6 +589,16 @@ def detectar_encabezado_producto_digitos(texto: str) -> tuple[str | None, str | 
     """Detecta 'Quicksilver...6771', 'Quicksilver ···· 6771', 'Venture X 1234'."""
     if not texto:
         return None, None
+    # Capital One pay screen: "Pagar a Quicksilver...6771" / "Pay Quicksilver...6771"
+    for pat in (
+        r"pagar\s+a\s+(.+?)[\.…\-–—·•*\s]+(\d{4})\b",
+        r"pay\s+(?:to\s+)?(.+?)[\.…\-–—·•*\s]+(\d{4})\b",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            nombre_raw = re.sub(r"[\.…\-–—·•*]+", " ", m.group(1)).strip()
+            if nombre_raw:
+                return nombre_raw, m.group(2)
     for pat, nombre in _PRODUCTOS_TARJETA:
         m = re.search(pat + _SEP_PRODUCTO_DIGITOS + r"(\d{4})\b", texto, re.IGNORECASE)
         if m:
@@ -768,20 +809,34 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 break
 
     # Saldo en tiempo real — Current Balance (app del banco / Hacer un pago)
-    for pat in (
-        rf"current\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"saldo\s+actual\s*[:\s]*\$?\s*{_MONTO}",
-        rf"balance\s+actual\s*[:\s]*\$?\s*{_MONTO}",
-        rf"outstanding\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"total\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            try:
-                r.current_balance = _float_es(m)
-                break
-            except ValueError:
-                continue
+    # Capital One: monto ENCIMA de la etiqueta ("$730.00\\nSaldo actual")
+    _ETIQ_CURRENT = (
+        r"current\s+balance",
+        r"saldo\s+actual",
+        r"balance\s+actual",
+        r"outstanding\s+balance",
+        r"total\s+balance",
+    )
+    for etiq in _ETIQ_CURRENT:
+        val = _monto_antes_de_etiqueta(texto, etiq)
+        if val is not None:
+            r.current_balance = val
+            break
+    if r.current_balance is None:
+        for pat in (
+            rf"current\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+            rf"saldo\s+actual\s*[:\s]*\$?\s*{_MONTO}",
+            rf"balance\s+actual\s*[:\s]*\$?\s*{_MONTO}",
+            rf"outstanding\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+            rf"total\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                try:
+                    r.current_balance = _float_es(m)
+                    break
+                except ValueError:
+                    continue
     if r.current_balance is None:
         for etiq in (
             r"current\s+balance",
@@ -815,25 +870,32 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         r"saldo\s+al\s+corte",
         r"saldo\s+del\s+estado\s+de\s+cuenta",
     )
-    for pat in (
-        rf"last\s+statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
-        rf"balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
-        rf"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
-        rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
-        rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
-        rf"saldo\s+al\s+corte\s*[:\s]*\$?\s*{_MONTO}",
-        rf"saldo\s+del\s+estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            try:
-                r.statement_balance = _float_es(m)
-                r.statement_balance_detectado = True
-                break
-            except ValueError:
-                continue
+    for etiq in _ETIQ_STATEMENT:
+        val = _monto_antes_de_etiqueta(texto, etiq)
+        if val is not None:
+            r.statement_balance = val
+            r.statement_balance_detectado = True
+            break
+    if not r.statement_balance_detectado:
+        for pat in (
+            rf"last\s+statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+            rf"statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+            rf"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
+            rf"balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
+            rf"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
+            rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+            rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
+            rf"saldo\s+al\s+corte\s*[:\s]*\$?\s*{_MONTO}",
+            rf"saldo\s+del\s+estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
+        ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                try:
+                    r.statement_balance = _float_es(m)
+                    r.statement_balance_detectado = True
+                    break
+                except ValueError:
+                    continue
     if not r.statement_balance_detectado:
         for etiq in _ETIQ_STATEMENT:
             val = _monto_en_lineas(texto, etiq, lineas=3)
@@ -853,25 +915,38 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.statement_balance_detectado = True
                 break
 
-    # Último pago / Last payment
-    for pat in (
-        rf"[uú]ltimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
-        rf"ultimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
-        rf"last\s+payment(?:\s+amount)?\s*[:\s]*\$?\s*{_MONTO}",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            try:
-                r.ultimo_pago = _float_es(m)
-                break
-            except ValueError:
-                continue
+    # Último pago / Last payment / Último pago registrado (Capital One ES)
+    _ETIQ_ULTIMO_PAGO = (
+        r"[uú]ltimo\s+pago\s+registrado",
+        r"ultimo\s+pago\s+registrado",
+        r"last\s+registered\s+payment",
+        r"last\s+payment(?:\s+amount)?",
+        r"[uú]ltimo\s+pago",
+        r"ultimo\s+pago",
+    )
+    for etiq in _ETIQ_ULTIMO_PAGO:
+        val = _monto_antes_de_etiqueta(texto, etiq)
+        if val is not None:
+            r.ultimo_pago = val
+            break
     if r.ultimo_pago is None:
-        for etiq in (
-            r"[uú]ltimo\s+pago",
-            r"ultimo\s+pago",
-            r"last\s+payment(?:\s+amount)?",
+        for pat in (
+            rf"[uú]ltimo\s+pago\s+registrado\s*[:\s]*\$?\s*{_MONTO}",
+            rf"ultimo\s+pago\s+registrado\s*[:\s]*\$?\s*{_MONTO}",
+            rf"last\s+registered\s+payment\s*[:\s]*\$?\s*{_MONTO}",
+            rf"[uú]ltimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
+            rf"ultimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
+            rf"last\s+payment(?:\s+amount)?\s*[:\s]*\$?\s*{_MONTO}",
         ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                try:
+                    r.ultimo_pago = _float_es(m)
+                    break
+                except ValueError:
+                    continue
+    if r.ultimo_pago is None:
+        for etiq in _ETIQ_ULTIMO_PAGO:
             val = _monto_en_lineas(texto, etiq, lineas=3)
             if val is not None:
                 r.ultimo_pago = val
@@ -961,49 +1036,55 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     r.banco = detectar_banco(texto)
     r.nombre_tarjeta = detectar_nombre_tarjeta(texto)
 
-    # Pago mínimo: directo en la misma línea (más preciso) y luego por columnas.
-    for pat in (
-        rf"pago\s+{_MINIMO}\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
-        rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
-        rf"pago\s+{_MINIMO}\s+requerido\s*[:\s]*\$?\s*{_MONTO}",
-        rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
-        rf"min(?:imum)?\s+payment\s+due\s*[:\s]*\$?\s*{_MONTO}",
-        rf"importe\s+{_MINIMO}\s*[:\s]*\$?\s*{_MONTO}",
-        rf"amount\s+due\s*[:\s]*\$?\s*{_MONTO}",
-    ):
-        m = re.search(pat, texto, re.IGNORECASE)
-        if m:
-            try:
-                val = _float_es(m)
-            except ValueError:
-                continue
-            if 0 < val < 5000:
-                r.pago_minimo = val
-                break
+    # Pago mínimo: Capital One monto-antes; luego misma línea; luego columnas.
+    _ETIQ_PAGO_MIN = (
+        rf"pago\s+{_MINIMO}\s+a\s+pagar",
+        r"minimum\s+payment\s+(?:due|amount)",
+        rf"{_MINIMO}\s+a\s+pagar",
+        rf"pago\s+{_MINIMO}",
+        r"minimum\s+payment",
+        r"min(?:imum)?\s+payment",
+        r"importe\s+m[íi]nimo",
+        r"amount\s+due",
+    )
+    for etiq in _ETIQ_PAGO_MIN:
+        val = _monto_antes_de_etiqueta(texto, etiq)
+        if val is not None and 0 <= val < 5000:
+            r.pago_minimo = val
+            break
+    if r.pago_minimo is None:
+        for pat in (
+            rf"pago\s+{_MINIMO}\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
+            rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
+            rf"pago\s+{_MINIMO}\s+requerido\s*[:\s]*\$?\s*{_MONTO}",
+            rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
+            rf"min(?:imum)?\s+payment\s+due\s*[:\s]*\$?\s*{_MONTO}",
+            rf"importe\s+{_MINIMO}\s*[:\s]*\$?\s*{_MONTO}",
+            rf"amount\s+due\s*[:\s]*\$?\s*{_MONTO}",
+        ):
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                try:
+                    val = _float_es(m)
+                except ValueError:
+                    continue
+                if 0 < val < 5000:
+                    r.pago_minimo = val
+                    break
     if r.pago_minimo is None:
         # "Mes(es)" descarta el aviso "Pago Mínimo — 8 Mes(es) — $176".
         ruido = (
             r"mes\(es\)|meses|si\s+usted|cada\s+per[ií]odo|each\s+period|you\s+will\s+pay"
             r"|warning|aviso|atraso|tardar|late\s+fee|no\s+recibimos|if\s+we\s+do\s+not"
         )
-        etiquetas_min = (
-            rf"pago\s+{_MINIMO}\s+a\s+pagar",
-            r"minimum\s+payment\s+(?:due|amount)",
-            rf"{_MINIMO}\s+a\s+pagar",
-            rf"pago\s+{_MINIMO}",
-            r"minimum\s+payment",
-            r"min(?:imum)?\s+payment",
-            r"importe\s+m[íi]nimo",
-            r"amount\s+due",
-        )
-        for etiq in etiquetas_min:
+        for etiq in _ETIQ_PAGO_MIN:
             val = _monto_en_lineas(texto, etiq, lineas=3, excluir=ruido)
             if val is not None and 0 < val < 5000:
                 r.pago_minimo = val
                 break
         if r.pago_minimo is None:
             # Columnas partidas: el monto queda suelto varias líneas después.
-            for etiq in etiquetas_min:
+            for etiq in _ETIQ_PAGO_MIN:
                 val = _monto_huerfano_tras_etiqueta(
                     texto,
                     etiq,

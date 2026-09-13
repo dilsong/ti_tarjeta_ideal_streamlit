@@ -445,6 +445,9 @@ def render_licencia_expirada() -> None:
 
 def render_pin_gate(on_unlock) -> None:
     """Crear PIN (solo si no existe en storage) o ingresar PIN para autenticar."""
+    from app.version_build import deploy_id
+
+    st.caption(f"TI deploy {deploy_id()}")
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)
@@ -456,11 +459,47 @@ def render_pin_gate(on_unlock) -> None:
         _render_desbloquear(on_unlock)
 
 
+def _inject_storage_persist_once() -> None:
+    """En PWA standalone, pide almacenamiento persistente (menos riesgo de eviction)."""
+    import streamlit.components.v1 as components
+
+    if st.session_state.get("ti_storage_persist_ok"):
+        return
+    components.html(
+        """
+        <script>
+        (function () {
+          try {
+            var standalone = false;
+            try {
+              standalone = !!(
+                (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+                (window.navigator && window.navigator.standalone === true)
+              );
+            } catch (e) {}
+            if (!standalone) return;
+            if (navigator.storage && navigator.storage.persist) {
+              navigator.storage.persist().catch(function () {});
+            }
+          } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
+    st.session_state["ti_storage_persist_ok"] = True
+
+
 def _render_crear_pin(on_unlock) -> None:
     from app.components.ti_loader import ti_spinner
 
     st.title("💳 " + t("pantalla_pin.crear_titulo"))
     st.info(t("pantalla_pin.crear_subtitulo"))
+    st.warning(
+        "En iPhone, Safari y el acceso directo (app) guardan el PIN por separado. "
+        "Si usas el ícono de inicio, crea el PIN desde ese ícono (no desde el link de Safari)."
+    )
+    _inject_storage_persist_once()
 
     step = st.session_state.get("pin_step", "pin")
     error = st.empty()
