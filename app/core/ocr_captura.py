@@ -140,6 +140,18 @@ def ocr_disponible() -> bool:
         return False
 
 
+def lectura_imagen_disponible() -> bool:
+    """True si Tesseract o Gemini Vision pueden interpretar fotos."""
+    if ocr_disponible():
+        return True
+    try:
+        from app.core.vision_gemini import vision_disponible
+
+        return vision_disponible()
+    except Exception:
+        return False
+
+
 def _preparar_imagen_ocr(imagen: Image.Image) -> Image.Image:
     """Mejora contraste/tamaño para leer mejor estados de cuenta."""
     img = imagen.convert("RGB")
@@ -1380,12 +1392,42 @@ def procesar_fuentes_captura(
             extras.append(extraer_datos_captura(texto_pdf))
 
     for imagen in imagenes:
-        ocr = texto_desde_imagen(imagen)
-        if ocr.strip():
-            partes.append(ocr.strip())
-        filas = texto_por_filas_desde_imagen(imagen)
-        if filas.strip():
-            extras.append(extraer_datos_captura(filas))
+        vision_ok = False
+        try:
+            from app.core.vision_gemini import (
+                _dump_textual_para_regex,
+                extraer_datos_desde_imagen_vision,
+                vision_disponible,
+            )
+        except Exception:
+            vision_disponible = None  # type: ignore[assignment]
+            extraer_datos_desde_imagen_vision = None  # type: ignore[assignment]
+            _dump_textual_para_regex = None  # type: ignore[assignment]
+
+        if vision_disponible is not None and vision_disponible():
+            datos_v = extraer_datos_desde_imagen_vision(imagen)
+            if datos_v is not None and (
+                datos_v.tiene_algo()
+                or datos_v.tiene_saldos_hoy()
+                or datos_v.tiene_reglas_banco()
+            ):
+                extras.append(datos_v)
+                dump = (
+                    _dump_textual_para_regex(datos_v)
+                    if _dump_textual_para_regex is not None
+                    else (datos_v.texto_crudo or "")
+                )
+                if dump.strip():
+                    partes.append(dump.strip())
+                vision_ok = True
+
+        if not vision_ok and ocr_disponible():
+            ocr = texto_desde_imagen(imagen)
+            if ocr.strip():
+                partes.append(ocr.strip())
+            filas = texto_por_filas_desde_imagen(imagen)
+            if filas.strip():
+                extras.append(extraer_datos_captura(filas))
 
     manual = (texto_manual or "").strip()
     if manual:

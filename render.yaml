@@ -17,3 +17,7 @@ services:
       # Fin de la prueba (ISO). Tras esta fecha la app muestra bloqueo de licencia.
       - key: FECHA_EXPIRACION_LICENCIA
         value: "2026-10-08"
+      # Gemini Vision (Flash) para leer capturas bancarias sin Tesseract.
+      # Definir el secreto en el dashboard de Render (no commitear la key).
+      - key: GEMINI_API_KEY
+        sync: false

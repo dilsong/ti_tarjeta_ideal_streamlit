@@ -24,7 +24,7 @@ from app.core.ocr_captura import (
     DatosCaptura,
     aplicar_analisis_deuda,
     encontrar_tarjeta_por_captura,
-    ocr_disponible,
+    lectura_imagen_disponible,
     pdf_disponible,
     procesar_fuentes_captura,
     procesar_ocr_saldos,
@@ -347,9 +347,18 @@ def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
         )
 
         try:
-            hay_ocr = ocr_disponible()
+            hay_lectura = lectura_imagen_disponible()
         except Exception:
-            hay_ocr = False
+            hay_lectura = False
+        try:
+            from app.core.vision_gemini import vision_disponible
+
+            hay_vision = vision_disponible()
+        except Exception:
+            hay_vision = False
+
+        if hay_vision:
+            st.caption(t("pantalla_registrar_tarjeta.ocr_vision_activa"))
 
         puede = bool(archivos_subidos or (texto_manual or "").strip())
         if st.button(
@@ -363,14 +372,14 @@ def _render_ocr_paso1(prefix: str, aplicar_fn) -> None:
 
             if archivos_subidos and any(_es_pdf_upload(f) for f in archivos_subidos) and not pdf_disponible():
                 st.error(t("wizard_tarjeta.ocr_pdf_no_disponible"))
-            if archivos_subidos and any(not _es_pdf_upload(f) for f in archivos_subidos) and not hay_ocr:
+            if archivos_subidos and any(not _es_pdf_upload(f) for f in archivos_subidos) and not hay_lectura:
                 st.warning(t("pantalla_registrar_tarjeta.ocr_no_disponible_pegar"))
 
             with ti_spinner("Leyendo reglas del banco…"):
                 datos, imagenes, pdfs = _procesar_archivos_subidos(
                     archivos_subidos,
                     texto_manual or "",
-                    usar_ocr_imagenes=hay_ocr,
+                    usar_ocr_imagenes=hay_lectura,
                 )
             st.session_state[ocr_k] = datos.to_dict()
 
@@ -411,12 +420,23 @@ def _render_ocr_bloque(
         return
 
     ocr_k = _ocr_key(prefix, paso)
-    hay_ocr = ocr_disponible()
+    try:
+        hay_lectura = lectura_imagen_disponible()
+    except Exception:
+        hay_lectura = False
+    try:
+        from app.core.vision_gemini import vision_disponible
+
+        hay_vision = vision_disponible()
+    except Exception:
+        hay_vision = False
     titulo = t("wizard_tarjeta.ocr_p2_titulo")
     ayuda = t("wizard_tarjeta.ocr_p2_ayuda")
 
     with st.expander(titulo, expanded=True):
         st.caption(ayuda)
+        if hay_vision:
+            st.caption(t("pantalla_registrar_tarjeta.ocr_vision_activa"))
         capturas: list = []
         # Siempre ofrecer uploader también en paso 2 (foto de la app).
         subido = st.file_uploader(
@@ -433,7 +453,7 @@ def _render_ocr_bloque(
             else:
                 st.caption(t("pantalla_registrar_tarjeta.ocr_imagen_invalida"))
 
-        if not hay_ocr:
+        if not hay_lectura:
             st.warning(t("pantalla_registrar_tarjeta.ocr_ayuda_solo_texto"))
 
         texto_manual = st.text_area(
@@ -457,11 +477,11 @@ def _render_ocr_bloque(
             if capturas:
                 imagen = _abrir_imagen_upload(capturas[0])
             with ti_spinner("Leyendo saldos del banco…"):
-                if imagen is not None and not hay_ocr and not (texto_manual or "").strip():
+                if imagen is not None and not hay_lectura and not (texto_manual or "").strip():
                     datos = procesar_fn(None, texto_manual or "")
                 else:
-                    datos = procesar_fn(imagen if hay_ocr else None, texto_manual or "")
-            if imagen is not None and not hay_ocr and not (texto_manual or "").strip():
+                    datos = procesar_fn(imagen if hay_lectura else None, texto_manual or "")
+            if imagen is not None and not hay_lectura and not (texto_manual or "").strip():
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             st.session_state[ocr_k] = datos.to_dict()
             if not datos.texto_crudo.strip() and imagen is None and not (texto_manual or "").strip():
