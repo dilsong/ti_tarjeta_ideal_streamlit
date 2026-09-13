@@ -156,6 +156,7 @@
     "btn_anterior": "← Volver al Paso 1",
     "error_volver_paso1": "Completa primero el Paso 1 (reglas del banco).",
     "error_falta_paso1_identidad": "Vuelve al Paso 1 y completa Banco, Nombre y Últimos 4 dígitos.",
+    "paso1_resumen": "Paso 1 guardado: {banco} · {nombre} ···· {digitos} · límite {limite} · corte {corte} · pago {pago}",
     "campo_fechas": "Fechas de corte/pago",
     "datos_paso1_intereses": "datos del Paso 1 (intereses)"
   },

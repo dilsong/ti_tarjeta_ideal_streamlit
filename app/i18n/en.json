@@ -156,6 +156,7 @@
     "btn_anterior": "← Back to Step 1",
     "error_volver_paso1": "Complete Step 1 (bank rules) first.",
     "error_falta_paso1_identidad": "Go back to Step 1 and complete Bank, Card name, and Last 4 digits.",
+    "paso1_resumen": "Step 1 saved: {banco} · {nombre} ···· {digitos} · limit {limite} · cut-off {corte} · payment {pago}",
     "campo_fechas": "Cut-off / payment dates",
     "datos_paso1_intereses": "Step 1 data (interest rates)"
   },

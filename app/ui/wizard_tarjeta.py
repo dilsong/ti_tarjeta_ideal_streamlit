@@ -58,12 +58,156 @@ def _paso_key(prefix: str) -> str:
     return f"{prefix}_wizard_paso"
 
 
+def _snap_paso1_key(prefix: str) -> str:
+    return f"{prefix}_wizard_paso1_snap"
+
+
+def _needs_restore_paso1_key(prefix: str) -> str:
+    return f"{prefix}_wizard_paso1_needs_restore"
+
+
 def _ocr_key(prefix: str, paso: int) -> str:
     return f"{prefix}_ocr_p{paso}_datos"
 
 
 def _prefill_key(prefix: str, paso: int) -> str:
     return f"{prefix}_ocr_p{paso}_prefill"
+
+
+def _datos_int_desde_dict(raw) -> "DatosIntereses | None":
+    from app.ui.form_intereses import DatosIntereses
+
+    if isinstance(raw, DatosIntereses):
+        return raw
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return DatosIntereses(**raw)
+    except TypeError:
+        return None
+
+
+def _guardar_snapshot_paso1(
+    prefix: str,
+    *,
+    banco: str,
+    nombre: str,
+    digitos: str,
+    limite: float,
+    corte: int,
+    pago: int,
+    datos_int,
+) -> None:
+    from dataclasses import asdict
+
+    from app.ui.form_intereses import DatosIntereses
+
+    di_dict = None
+    if isinstance(datos_int, DatosIntereses):
+        di_dict = asdict(datos_int)
+    elif isinstance(datos_int, dict):
+        di_dict = dict(datos_int)
+
+    snap = {
+        "banco": (banco or "").strip(),
+        "nombre": (nombre or "").strip(),
+        "digitos": (digitos or "").strip()[:4],
+        "limite": float(limite),
+        "corte": int(corte),
+        "pago": int(pago),
+        "datos_int": di_dict,
+    }
+    st.session_state[_snap_paso1_key(prefix)] = snap
+
+    # Mirror into widget keys so they survive if still present.
+    k = _keys_form(prefix)
+    init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, snap["banco"], force=True)
+    init_select_with_add(k["nombre"], "nombres_tarjeta", NOMBRES_DEFAULT, snap["nombre"], force=True)
+    st.session_state[k["digitos"]] = snap["digitos"]
+    st.session_state[k["limite"]] = f"{snap['limite']:.2f}"
+    st.session_state[k["corte"]] = str(snap["corte"])
+    st.session_state[k["pago"]] = str(snap["pago"])
+
+
+def _leer_snapshot_paso1(prefix: str) -> dict | None:
+    snap = st.session_state.get(_snap_paso1_key(prefix))
+    return snap if isinstance(snap, dict) else None
+
+
+def _restaurar_snapshot_paso1_a_widgets(prefix: str) -> None:
+    """Call at the START of _render_paso1, BEFORE creating widgets."""
+    snap = _leer_snapshot_paso1(prefix)
+    if not snap:
+        return
+
+    k = _keys_form(prefix)
+    needs = bool(st.session_state.pop(_needs_restore_paso1_key(prefix), False))
+    # Also restore if Streamlit dropped unmounted widget keys.
+    if not needs and k["digitos"] in st.session_state:
+        return
+
+    if snap.get("banco"):
+        init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, snap["banco"], force=True)
+    if snap.get("nombre"):
+        init_select_with_add(
+            k["nombre"], "nombres_tarjeta", NOMBRES_DEFAULT, snap["nombre"], force=True
+        )
+    if snap.get("digitos"):
+        st.session_state[k["digitos"]] = str(snap["digitos"])[:4]
+    if snap.get("limite") is not None:
+        st.session_state[k["limite"]] = f"{float(snap['limite']):.2f}"
+    if snap.get("corte") is not None:
+        st.session_state[k["corte"]] = str(int(snap["corte"]))
+    if snap.get("pago") is not None:
+        st.session_state[k["pago"]] = str(int(snap["pago"]))
+
+    di = snap.get("datos_int")
+    if isinstance(di, dict):
+        datos_int = _datos_int_desde_dict(di)
+        if datos_int is not None:
+            st.session_state[f"{prefix}_datos_int"] = datos_int
+            st.session_state[f"{prefix}_tasa_anual"] = float(datos_int.tasa_interes_anual)
+            if datos_int.tasa_interes_mora is not None:
+                st.session_state[f"{prefix}_tasa_mora"] = float(datos_int.tasa_interes_mora)
+            if datos_int.cargo_atraso is not None:
+                st.session_state[f"{prefix}_cargo_atraso"] = float(datos_int.cargo_atraso)
+            st.session_state[f"{prefix}_pago_pct"] = float(datos_int.pago_minimo_pct)
+            st.session_state[f"{prefix}_pago_piso"] = float(datos_int.pago_minimo_piso)
+            if datos_int.pago_minimo_manual is not None:
+                st.session_state[f"{prefix}_pago_manual_on"] = True
+                st.session_state[f"{prefix}_pago_manual_val"] = float(datos_int.pago_minimo_manual)
+
+
+def _actualizar_snapshot_paso1_desde_ocr(prefix: str, datos: DatosCaptura) -> None:
+    """Merge OCR identity/rules into the durable Paso 1 snapshot (create if needed)."""
+    snap = _leer_snapshot_paso1(prefix) or {}
+    if datos.banco:
+        snap["banco"] = str(datos.banco).strip()
+    if datos.nombre_tarjeta:
+        snap["nombre"] = str(datos.nombre_tarjeta).strip()
+    if datos.ultimos_digitos:
+        snap["digitos"] = str(datos.ultimos_digitos).strip()[:4]
+    if datos.limite is not None:
+        snap["limite"] = float(datos.limite)
+    if datos.dia_corte is not None:
+        snap["corte"] = int(datos.dia_corte)
+    if datos.dia_pago is not None:
+        snap["pago"] = int(datos.dia_pago)
+    st.session_state[_snap_paso1_key(prefix)] = snap
+
+
+def _identidad_desde_snap_o_session(prefix: str) -> tuple[str, str, str]:
+    """Prefer durable Paso 1 snapshot; fall back to live widget session keys."""
+    snap = _leer_snapshot_paso1(prefix) or {}
+    banco = (snap.get("banco") or "").strip()
+    nombre = (snap.get("nombre") or "").strip()
+    digitos = str(snap.get("digitos") or "").strip()[:4]
+    if not banco or not nombre or len(digitos) != 4:
+        b2, n2, d2 = _identidad_desde_session(prefix)
+        banco = banco or b2
+        nombre = nombre or n2
+        digitos = digitos if len(digitos) == 4 and digitos.isdigit() else d2
+    return banco, nombre, digitos
 
 
 def _render_stepper(paso: int) -> None:
@@ -127,6 +271,7 @@ def _aplicar_ocr_paso1(prefix: str, datos: DatosCaptura) -> None:
         prefill["pago_minimo"] = float(datos.pago_minimo)
     st.session_state[_prefill_key(prefix, 1)] = prefill
     aplicar_prefill_a_widgets(prefix, prefill)
+    _actualizar_snapshot_paso1_desde_ocr(prefix, datos)
 
 
 def _aplicar_ocr_paso2(prefix: str, datos: DatosCaptura) -> None:
@@ -193,6 +338,8 @@ def _aplicar_ocr_paso2(prefix: str, datos: DatosCaptura) -> None:
                 init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, matched.banco, force=True)
     else:
         st.session_state.pop(f"{prefix}_ocr_tarjeta_match", None)
+
+    _actualizar_snapshot_paso1_desde_ocr(prefix, datos)
 
 
 def _mostrar_resumen_ocr(datos: DatosCaptura, paso: int) -> None:
@@ -606,6 +753,7 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
     """Paso 1 — reglas. Devuelve True si el usuario avanzó al paso 2."""
     st.markdown(f"### {t('wizard_tarjeta.paso1_titulo')}")
     st.caption(t("wizard_tarjeta.paso1_texto"))
+    _restaurar_snapshot_paso1_a_widgets(prefix)
 
     _render_ocr_paso1(prefix, _aplicar_ocr_paso1)
 
@@ -670,6 +818,16 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
         if faltantes:
             err.error(mensaje_campos_faltantes(faltantes))
         else:
+            _guardar_snapshot_paso1(
+                prefix,
+                banco=banco,
+                nombre=nombre,
+                digitos=digitos,
+                limite=float(limite),
+                corte=int(corte),
+                pago=int(pago),
+                datos_int=datos_int,
+            )
             st.session_state[_paso_key(prefix)] = 2
             st.session_state[f"{prefix}_datos_int"] = datos_int
             st.rerun()
@@ -687,10 +845,27 @@ def _render_paso2(
     st.markdown(f"### {t('wizard_tarjeta.paso2_titulo')}")
     st.caption(t("wizard_tarjeta.paso2_texto"))
 
+    snap = _leer_snapshot_paso1(prefix) or {}
+    if snap:
+        st.info(
+            t(
+                "wizard_tarjeta.paso1_resumen",
+                banco=snap.get("banco") or "—",
+                nombre=snap.get("nombre") or "—",
+                digitos=snap.get("digitos") or "————",
+                limite=fmt_dinero(float(snap["limite"])) if snap.get("limite") is not None else "—",
+                corte=snap.get("corte", "—"),
+                pago=snap.get("pago", "—"),
+            )
+        )
+
     _render_ocr_bloque(prefix, 2, procesar_ocr_saldos, _aplicar_ocr_paso2)
 
     k = _keys_form(prefix)
-    limite = parse_monto(str(st.session_state.get(k["limite"], "0")))
+    if snap.get("limite") is not None:
+        limite = float(snap["limite"])
+    else:
+        limite = parse_monto(str(st.session_state.get(k["limite"], "0")))
 
     c1, c2 = st.columns(2)
     with c1:
@@ -757,7 +932,9 @@ def _render_paso2(
         key=k["preferencia"],
     )
 
-    banco_limpio = (st.session_state.get(f"swa_sel_{k['banco']}", "") or "").strip()
+    banco_limpio = (snap.get("banco") or "").strip()
+    if not banco_limpio:
+        banco_limpio = (st.session_state.get(f"swa_sel_{k['banco']}", "") or "").strip()
     url_conocida = url_catalogo(banco_limpio, preferencia) if banco_limpio else None
     url_manual: str | None = None
     if banco_limpio and url_conocida:
@@ -777,7 +954,7 @@ def _render_paso2(
             placeholder="https://",
         )
 
-    banco_prev, nombre_prev, digitos_prev = _identidad_desde_session(prefix)
+    banco_prev, nombre_prev, digitos_prev = _identidad_desde_snap_o_session(prefix)
     faltantes_id_prev = _faltantes_identidad(banco_prev, nombre_prev, digitos_prev)
     if faltantes_id_prev:
         st.warning(
@@ -789,6 +966,7 @@ def _render_paso2(
     c_back, c_save = st.columns(2)
     with c_back:
         if st.button(t("wizard_tarjeta.btn_anterior"), key=f"{prefix}_paso2_back", use_container_width=True):
+            st.session_state[_needs_restore_paso1_key(prefix)] = True
             st.session_state[_paso_key(prefix)] = 1
             st.rerun()
     with c_save:
@@ -800,9 +978,15 @@ def _render_paso2(
         )
 
     if guardar:
-        banco, nombre, digitos = _identidad_desde_session(prefix)
-        corte = st.session_state.get(k["corte"], "1")
-        pago = st.session_state.get(k["pago"], "1")
+        banco, nombre, digitos = _identidad_desde_snap_o_session(prefix)
+        if snap.get("corte") is not None:
+            corte = snap["corte"]
+        else:
+            corte = st.session_state.get(k["corte"], "1")
+        if snap.get("pago") is not None:
+            pago = snap["pago"]
+        else:
+            pago = st.session_state.get(k["pago"], "1")
         try:
             corte_ok = 1 <= int(corte) <= 31
         except (TypeError, ValueError):
@@ -811,7 +995,9 @@ def _render_paso2(
             pago_ok = 1 <= int(pago) <= 31
         except (TypeError, ValueError):
             pago_ok = False
-        datos_int = st.session_state.get(f"{prefix}_datos_int")
+        datos_int = _datos_int_desde_dict(snap.get("datos_int"))
+        if datos_int is None:
+            datos_int = st.session_state.get(f"{prefix}_datos_int")
         if datos_int is None and tarjeta:
             from app.ui.form_intereses import DatosIntereses
 
@@ -923,6 +1109,8 @@ def _render_paso2(
 
 
 def _limpiar_wizard(prefix: str) -> None:
+    st.session_state.pop(_snap_paso1_key(prefix), None)
+    st.session_state.pop(_needs_restore_paso1_key(prefix), None)
     for key in list(st.session_state.keys()):
         if key.startswith(f"{prefix}_wizard") or key.startswith(f"{prefix}_ocr"):
             st.session_state.pop(key, None)
