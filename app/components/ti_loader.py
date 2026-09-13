@@ -158,8 +158,17 @@ def show_ti_loader(mensaje: str = "") -> None:
 
 
 def hide_ti_loader() -> None:
-    """Oculta / elimina el overlay TI."""
-    components.html(_hide_script(), height=0, width=0)
+    """Oculta / elimina el overlay TI (fuerza re-ejecución del script)."""
+    import streamlit as st
+
+    seq = int(st.session_state.get("ti_loader_hide_seq", 0)) + 1
+    st.session_state["ti_loader_hide_seq"] = seq
+    # Comentario HTML único: Streamlit a veces no reinyecta el mismo markup.
+    components.html(
+        f"<!-- ti-hide-{seq} -->" + _hide_script(),
+        height=0,
+        width=0,
+    )
 
 
 @contextmanager

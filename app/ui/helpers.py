@@ -445,9 +445,17 @@ def render_licencia_expirada() -> None:
 
 def render_pin_gate(on_unlock) -> None:
     """Crear PIN (solo si no existe en storage) o ingresar PIN para autenticar."""
+    from app.components.ti_loader import hide_ti_loader
     from app.version_build import deploy_id
 
-    st.caption(f"TI deploy {deploy_id()}")
+    # Quita overlay TI si quedó pegado tras un rerun en iPhone PWA.
+    hide_ti_loader()
+
+    st.markdown(
+        f'<div style="font-size:0.85rem;color:#94A3B8;margin:0 0 0.6rem 0;">'
+        f'TI deploy <code style="color:#60A5FA;">{deploy_id()}</code></div>',
+        unsafe_allow_html=True,
+    )
     c_sp, c_lang = st.columns([4, 1])
     with c_lang:
         language_selector(aligned=True)
@@ -491,8 +499,7 @@ def _inject_storage_persist_once() -> None:
 
 
 def _render_crear_pin(on_unlock) -> None:
-    from app.components.ti_loader import ti_spinner
-
+    # Sin ti_spinner: en iPhone PWA el overlay en window.top sobrevive al rerun y bloquea la app.
     st.title("💳 " + t("pantalla_pin.crear_titulo"))
     st.info(t("pantalla_pin.crear_subtitulo"))
     st.warning(
@@ -518,20 +525,16 @@ def _render_crear_pin(on_unlock) -> None:
         if st.button(t("pantalla_pin.boton_crear"), key="pin_create", type="primary", use_container_width=True):
             if pin2 != st.session_state.get("pin_temp", ""):
                 error.error(t("pantalla_pin.error_pin_no_coincide"))
+            elif crear_pin(pin2):
+                st.session_state.pop("pin_step", None)
+                st.session_state.pop("pin_temp", None)
+                on_unlock()
             else:
-                with ti_spinner("Creando PIN de seguridad…"):
-                    ok = crear_pin(pin2)
-                if ok:
-                    st.session_state.pop("pin_step", None)
-                    st.session_state.pop("pin_temp", None)
-                    on_unlock()
-                else:
-                    error.error(t("pantalla_pin.error_pin_corto"))
+                error.error(t("pantalla_pin.error_pin_corto"))
 
 
 def _render_desbloquear(on_unlock) -> None:
-    from app.components.ti_loader import ti_spinner
-
+    # Validar PIN es instantáneo: no usar overlay (se pegaba en PWA iPhone).
     st.title("🔐 " + t("pantalla_pin.desbloquear_titulo"))
     st.info(t("pantalla_pin.desbloquear_subtitulo"))
 
@@ -539,9 +542,7 @@ def _render_desbloquear(on_unlock) -> None:
     pin = pin_input(t("pantalla_pin.pin"), "unlock_pin")
 
     if st.button(t("pantalla_pin.boton_desbloquear"), key="unlock", type="primary", use_container_width=True):
-        with ti_spinner("Validando PIN…"):
-            ok = verificar_pin(pin)
-        if ok:
+        if verificar_pin(pin):
             on_unlock()
         else:
             error.error(t("pantalla_pin.error_pin_incorrecto"))
