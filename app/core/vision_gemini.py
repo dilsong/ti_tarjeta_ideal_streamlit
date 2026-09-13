@@ -28,45 +28,67 @@ _ENDPOINT = (
 )
 
 _PROMPT = """\
-Analyze this bank credit-card screenshot / statement photo (often Capital One
-Spanish UI: "Hacer un pago", "Saldo actual", "Último balance de declaración").
+Analyze this bank credit-card screenshot / statement photo / summary card.
+Cover ALL of these common layouts (Spanish and English):
 
-IMPORTANT layout quirks on Capital One "Hacer un pago":
-1) The dollar AMOUNT appears ABOVE its label (e.g. "$730.00" then "Saldo actual").
-   Do not swap amount and label.
-2) Card identity is often in the HEADER behind/above the payment modal, as
-   "Pagar a PRODUCTO...####" or "Pay PRODUCT...####"
-   (example: "Pagar a Quicksilver...6771"). Read that header for:
-   - nombre_tarjeta = product name (Quicksilver, Venture, Savor, …)
-   - ultimos_digitos = the 4 digits after the ellipsis
-   - banco = "Capital One" when the UI looks like Capital One
+LAYOUT A — Capital One ES "Hacer un pago":
+- Amount ABOVE label (e.g. "$730" then "Saldo actual"). Do NOT swap amount/label.
+- Header: "Pagar a Quicksilver...6771" → nombre_tarjeta=Quicksilver, ultimos_digitos=6771,
+  banco="Capital One"
+- "$0" / "Último balance de declaración" → statement_balance=0, statement_balance_detectado=true
+- "$730" / "Saldo actual" → current_balance=730
+- "$291.33" / "Último pago registrado" → ultimo_pago=291.33  (NEVER use as current_balance)
+- "$0" / "Pago mínimo" → pago_minimo=0
 
-Typical Capital One pay-screen mapping (example values):
-- "$0.00" above "Último balance de declaración" → statement_balance = 0,
-  statement_balance_detectado = true
-- "$730.00" above "Saldo actual" → current_balance = 730
-- "$291.33" above "Último pago registrado" → ultimo_pago = 291.33
-- "$0.00" above "Pago mínimo" → pago_minimo = 0
+LAYOUT B — Capital One EN "Standard Payment":
+- "Pay to: Visa 3890" → nombre_tarjeta=Visa (or product), ultimos_digitos=3890, banco="Capital One"
+- Label then amount: Minimum Payment, Statement Balance, Current Balance
+- Due Date: 09/20/2026 → dia_pago=20 (day of month only)
 
-Extract a single JSON object with these keys (use null if not visible):
-- banco (string, e.g. "Capital One")
-- nombre_tarjeta (string, e.g. "Quicksilver")
+LAYOUT C — Bank of America statement (PDF page image):
+- "Bank of America", "Visa Signature", account …9253 or full PAN ending 9253
+  → banco="Bank of America", nombre_tarjeta=Visa Signature, ultimos_digitos=9253
+- "Total Credit Line" / "Total Credit Limit" → limite
+- "New Balance" / "New Balance Total" → statement_balance (NOT current)
+- "Total Minimum Payment Due" / "Current Payment Due" → pago_minimo
+- "Payment Due Date" MM/DD/YYYY → dia_pago = day
+- "Statement Closing Date" MM/DD/YYYY → dia_corte = day
+- Late fee up to $XX → late_fee; Penalty APR → penalty_apr; Purchase APR → apr
+
+LAYOUT D — Spanish summary card:
+- "Pago mínimo total que vence $35.00" → pago_minimo
+- "Fecha de vencimiento de pago sept 19" → dia_pago=19
+- "Saldo del estado de cuenta $826.89" → statement_balance
+- "Próxima fecha de cierre sept 22" → dia_corte=22
+- Month abbreviations: sept/sep/ago/aug/ene/jan/… → extract DAY only for dia_pago/dia_corte
+
+CRITICAL RULES:
+1) NEVER confuse "Último pago registrado" / Last payment with current_balance.
+2) "New Balance", "New Balance Total", "Saldo del estado de cuenta", "Saldo nuevo",
+   "Statement Balance", "Último balance de declaración" → statement_balance.
+   Set statement_balance_detectado=true whenever that field is visible, INCLUDING $0.
+3) Do NOT use "Previous Balance" as current_balance or statement_balance.
+4) "Total Credit Line" / "Total Credit Limit" / "Límite de crédito" → limite.
+5) banco: "Capital One" vs "Bank of America" (never swap).
+
+Extract a single JSON object (null if not visible):
+- banco (string)
+- nombre_tarjeta (string)
 - ultimos_digitos (string, exactly 4 digits)
 - current_balance (number) — Saldo actual / Current balance
-- statement_balance (number) — Último balance de declaración / Statement balance;
-  include 0.00 when shown as zero
-- statement_balance_detectado (boolean) — true if that field was visible (even if 0)
-- ultimo_pago (number) — Último pago registrado / Last payment
-- pago_minimo (number) — Minimum payment due
-- limite (number) — Credit limit
-- dia_corte (integer 1-31) — statement/cut-off day
-- dia_pago (integer 1-31) — payment due day
-- apr (number) — purchase APR percent
+- statement_balance (number) — also accept alias new_balance
+- statement_balance_detectado (boolean)
+- ultimo_pago (number)
+- pago_minimo (number)
+- limite (number)
+- dia_corte (integer 1-31)
+- dia_pago (integer 1-31)
+- apr (number)
+- penalty_apr (number)
 - late_fee (number)
-- past_due / monto_vencido_atrasado (number) — past due amount if any
+- past_due / monto_vencido_atrasado (number)
 
-Identity may be incomplete; still return balances you can see. Return ONLY valid
-JSON, no markdown fences.
+Identity may be incomplete; still return balances. Return ONLY valid JSON, no markdown.
 """
 
 
@@ -115,21 +137,85 @@ def _parse_float(val: Any) -> float | None:
             return None
 
 
-def _parse_int_dia(val: Any) -> int | None:
+_MESES_LIBRES = (
+    r"(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|"
+    r"jul(?:io)?|ago(?:sto)?|sep(?:t(?:iembre)?)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?|"
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+)
+
+
+def _parse_dia_desde_fecha_libre(val: Any) -> int | None:
+    """Extrae día 1–31 de 'sept 19', '09/20/2026', 'Aug 22, 2024', etc."""
     if val is None or isinstance(val, bool):
         return None
     if isinstance(val, int):
-        d = val
-    elif isinstance(val, float):
+        return val if 1 <= val <= 31 else None
+    if isinstance(val, float):
         d = int(val)
-    else:
-        m = re.search(r"\d{1,2}", str(val))
-        if not m:
-            return None
-        d = int(m.group(0))
-    if 1 <= d <= 31:
-        return d
+        return d if 1 <= d <= 31 else None
+
+    t = str(val).strip()
+    if not t:
+        return None
+
+    # Reusa el parser OCR si está disponible (soporta sept/sep/MM/DD/…).
+    try:
+        from app.core.ocr_captura import _dia_desde_fecha
+
+        d = _dia_desde_fecha(t)
+        if d is not None:
+            return d
+    except Exception:
+        pass
+
+    m = re.search(
+        rf"\b(?:{_MESES_LIBRES})\.?\s+(\d{{1,2}})(?:[,\s]+\d{{2,4}})?\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        d = int(m.group(1))
+        return d if 1 <= d <= 31 else None
+
+    m = re.search(
+        rf"\b(\d{{1,2}})\s+(?:de\s+)?(?:{_MESES_LIBRES})\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        d = int(m.group(1))
+        return d if 1 <= d <= 31 else None
+
+    m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", t)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if 1 <= a <= 12 and b > 12 and b <= 31:
+            return b
+        if a > 12 and a <= 31 and 1 <= b <= 12:
+            return a
+        if 1 <= b <= 31:
+            return b
+        if 1 <= a <= 31:
+            return a
+
+    m = re.search(r"\b(\d{1,2})\b", t)
+    if m:
+        d = int(m.group(1))
+        return d if 1 <= d <= 31 else None
     return None
+
+
+def _parse_int_dia(val: Any) -> int | None:
+    """Día de corte/pago: entero directo o fecha libre ('sept 19', '09/20/2026')."""
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val if 1 <= val <= 31 else None
+    if isinstance(val, float):
+        d = int(val)
+        return d if 1 <= d <= 31 else None
+    return _parse_dia_desde_fecha_libre(val)
 
 
 def _parse_digitos(val: Any) -> str | None:
@@ -165,11 +251,22 @@ def _datos_desde_vision_json(data: dict[str, Any]) -> DatosCaptura:
 
     current = _parse_float(data.get("current_balance"))
     statement = _parse_float(data.get("statement_balance"))
+    # Alias: New Balance / New Balance Total → statement_balance
+    if statement is None:
+        statement = _parse_float(data.get("new_balance"))
+        if statement is None:
+            statement = _parse_float(data.get("new_balance_total"))
+
     # Si el modelo marca detectado o envió el campo (incluso 0), respetarlo.
     sb_detectado = _parse_bool(data.get("statement_balance_detectado"))
-    if "statement_balance" in data and data.get("statement_balance") is not None:
+    sb_raw = data.get("statement_balance")
+    if sb_raw is None:
+        sb_raw = data.get("new_balance")
+    if sb_raw is None:
+        sb_raw = data.get("new_balance_total")
+    if sb_raw is not None:
         sb_detectado = True
-        if statement is None and str(data.get("statement_balance")).strip() in ("0", "0.0", "0.00"):
+        if statement is None and str(sb_raw).strip() in ("0", "0.0", "0.00"):
             statement = 0.0
 
     past = _parse_float(data.get("monto_vencido_atrasado"))
@@ -190,6 +287,7 @@ def _datos_desde_vision_json(data: dict[str, Any]) -> DatosCaptura:
         dia_corte=_parse_int_dia(data.get("dia_corte")),
         dia_pago=_parse_int_dia(data.get("dia_pago")),
         apr=_parse_float(data.get("apr")),
+        penalty_apr=_parse_float(data.get("penalty_apr")),
         late_fee=_parse_float(data.get("late_fee")),
         monto_vencido_atrasado=past,
     )
@@ -217,6 +315,8 @@ def _datos_desde_vision_json(data: dict[str, Any]) -> DatosCaptura:
         partes_resumen.append(f"Día de pago: {r.dia_pago}")
     if r.apr is not None:
         partes_resumen.append(f"APR: {r.apr}")
+    if r.penalty_apr is not None:
+        partes_resumen.append(f"Penalty APR: {r.penalty_apr}")
     if r.late_fee is not None:
         partes_resumen.append(f"Late fee: ${r.late_fee:.2f}")
     if r.monto_vencido_atrasado is not None:
@@ -290,6 +390,8 @@ def _dump_textual_para_regex(r: DatosCaptura) -> str:
         lineas.append(f"Fecha de pago día {r.dia_pago}")
     if r.apr is not None:
         lineas.append(f"APR {r.apr}%")
+    if r.penalty_apr is not None:
+        lineas.append(f"Penalty APR {r.penalty_apr}%")
     if r.late_fee is not None:
         lineas.append(f"Late fee ${r.late_fee:.2f}")
     if r.monto_vencido_atrasado is not None:

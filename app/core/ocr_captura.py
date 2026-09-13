@@ -279,9 +279,12 @@ def texto_por_filas_desde_imagen(imagen: Image.Image) -> str:
 
 _MESES_ES = (
     r"(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|"
-    r"jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)"
+    r"jul(?:io)?|ago(?:sto)?|sep(?:t(?:iembre)?)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?)"
 )
-_MESES_EN = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+_MESES_EN = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+)
 _MONTO = r"(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+\.\d{2}|\d+)"
 # "mínimo" tolerante a acentos perdidos y confusiones típicas del OCR (í→i/1/l/f).
 _MINIMO = r"m[íi1lf]n[íi1lf]mo"
@@ -446,13 +449,16 @@ def _monto_antes_de_etiqueta(texto: str, etiqueta_re: str) -> float | None:
     Capital One (y similares): el monto aparece ENCIMA de la etiqueta.
 
     Ej. ``$730.00\\nSaldo actual`` o ``$291.33 Saldo actual``.
+
+    El monto debe iniciar la línea (no el de otra etiqueta en la línea previa,
+    p.ej. ``Minimum Payment $0.00\\nStatement Balance``).
     """
     if not texto or not etiqueta_re:
         return None
-    # Monto en línea previa (o separado por espacios) + etiqueta
-    pat_bloque = rf"\$?\s*{_MONTO}\s*(?:\n|\r\n|\s)+{etiqueta_re}\b"
-    # Misma línea: $X.XX … etiqueta
-    pat_misma = rf"\$?\s*{_MONTO}\s+{etiqueta_re}\b"
+    # Monto solo en su línea + etiqueta en la siguiente
+    pat_bloque = rf"(?m)^[ \t]*\$?\s*{_MONTO}[ \t]*\n[ \t]*{etiqueta_re}\b"
+    # Misma línea: $X.XX etiqueta (sin otra etiqueta delante)
+    pat_misma = rf"(?m)^[ \t]*\$?\s*{_MONTO}[ \t]+{etiqueta_re}\b"
     for pat in (pat_bloque, pat_misma):
         m = re.search(pat, texto, re.IGNORECASE)
         if not m:
@@ -483,21 +489,31 @@ def _limpiar_texto_ocr(texto: str) -> str:
         (r"payment\s+due\s+date", "Payment Due Date"),
         (r"statement\s+closing\s+date", "Statement Closing Date"),
         (r"minimum\s+payment\s+due", "Minimum Payment Due"),
+        (r"total\s+minimum\s+payment\s+due", "Total Minimum Payment Due"),
+        (r"current\s+payment\s+due", "Current Payment Due"),
+        (r"new\s+balance\s+total", "New Balance Total"),
+        (r"total\s+credit\s+line", "Total Credit Line"),
+        (r"total\s+credit\s+limit", "Total Credit Limit"),
         (r"past\s+due", "Past Due"),
         (r"payment\s+to\s+avoid\s+interest", "Payment to avoid interest"),
         (r"closing\s+date", "Closing Date"),
+        (r"previous\s+balance", "Previous Balance"),
         # Español
         (r"l[ií]mite\s+de\s+cr[eé]dito", "Límite de crédito"),
         (r"saldo\s+nuevo", "Saldo nuevo"),
         (r"cr[eé]dito\s+disponible", "Crédito disponible"),
         (r"fecha\s+l[ií]mite\s+de\s+pago", "Fecha límite de pago"),
+        (r"fecha\s+de\s+vencimiento\s+de\s+pago", "Fecha de vencimiento de pago"),
         (r"fecha\s+de\s+vencimiento(?:\s+del\s+pago)?", "Fecha de vencimiento del pago"),
+        (r"pr[oó]xima\s+fecha\s+de\s+cierre", "Próxima fecha de cierre"),
         (r"fecha\s+de\s+corte", "Fecha de corte"),
         (r"monto\s+vencido(?:\s+atrasado)?", "Monto vencido"),
         (r"saldo\s+vencido", "Saldo vencido"),
+        (r"pago\s+m[ií]nimo\s+total\s+que\s+vence", "Pago mínimo total que vence"),
         (r"pago\s+m[ií]nimo", "Pago mínimo"),
         (r"pago\s+(?:para\s+)?sin\s+intereses", "Pago sin intereses"),
         (r"pago\s+para\s+no\s+generar\s+intereses", "Pago para no generar intereses"),
+        (r"saldo\s+del\s+estado\s+de\s+cuenta", "Saldo del estado de cuenta"),
     ):
         t = re.sub(pat, rep, t, flags=re.IGNORECASE)
     return t
@@ -508,6 +524,7 @@ _BANCOS_DETECT: tuple[tuple[str, str], ...] = (
     ("credit one", "Credit One"),
     ("capital one", "Capital One"),
     ("bank of america", "Bank of America"),
+    ("bankofamerica", "Bank of America"),
     ("wells fargo", "Wells Fargo"),
     ("american express", "American Express"),
     ("scotiabank", "Scotiabank"),
@@ -537,6 +554,7 @@ _PRODUCTOS_TARJETA: tuple[tuple[str, str], ...] = (
     (r"\bsimplicity\b", "Simplicity"),
     (r"\bwalmart\s+rewards?\b", "Walmart Rewards"),
     (r"\bworld\s+elite\b", "World Elite"),
+    (r"\bvisa\s+signature\b", "Visa Signature"),
     (r"\bplatinum\b", "Platinum"),
     (r"\bgold\b", "Gold"),
 )
@@ -580,8 +598,9 @@ def detectar_ultimos_digitos(texto: str) -> str | None:
         r"que\s+termina\s+en\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
         r"(?:account\s+(?:number\s+)?)?(?:that\s+)?(?:ends?|ending)\s+in\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
         r"end(?:ing)?\s+in\s*[:#\s]*(?:\*+|x+|X+|•+|xxxx)?\s*(\d{4})\b",
-        r"account\s+number\s*[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
-        r"(?:#{1}|x{4}|\*{4}|•{4}|xxxx)[-\s]*(\d{4})\b",
+        r"account\s+(?:number\s*)?[:\s]*(?:\d{4}[\s-]*){3}(\d{4})\b",
+        r"account\s+(?:number\s*|ending\s*|[#….\-*•xX]*)\s*(\d{4})\b",
+        r"(?:#{1}|x{4}|\*{4}|•{4}|xxxx|\.{2,}|…+)[-\s]*(\d{4})\b",
         r"#\s*(\d{4})\b",
         r"\b(?:\d{4}[\s-]*){3}(\d{4})\b",
     ):
@@ -601,8 +620,9 @@ def detectar_encabezado_producto_digitos(texto: str) -> tuple[str | None, str | 
     """Detecta 'Quicksilver...6771', 'Quicksilver ···· 6771', 'Venture X 1234'."""
     if not texto:
         return None, None
-    # Capital One pay screen: "Pagar a Quicksilver...6771" / "Pay Quicksilver...6771"
+    # Capital One pay screen: "Pagar a Quicksilver...6771" / "Pay to: Visa 3890"
     for pat in (
+        r"pay\s+to\s*:\s*([A-Za-z][A-Za-z0-9 ]*?)\s+(\d{4})\b",
         r"pagar\s+a\s+(.+?)[\.…\-–—·•*\s]+(\d{4})\b",
         r"pay\s+(?:to\s+)?(.+?)[\.…\-–—·•*\s]+(\d{4})\b",
     ):
@@ -680,10 +700,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     texto = _limpiar_texto_ocr(bruto)
 
-    # Fechas numéricas US (Credit One) y ES
+    # Fechas numéricas US (Credit One / BoA) y ES
     m = re.search(
         r"(?:payment\s+due\s+date|due\s+date|pay\s+by|payment\s+date|"
-        r"fecha\s+l[ií]mite\s+de\s+pago|fecha\s+de\s+vencimiento(?:\s+del\s+pago)?|"
+        r"fecha\s+l[ií]mite\s+de\s+pago|fecha\s+de\s+vencimiento(?:\s+de\s+pago|\s+del\s+pago)?|"
         r"fecha\s+de\s+pago|vence\s+el)\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
         texto,
         re.IGNORECASE,
@@ -692,6 +712,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         r.dia_pago = _dia_desde_fecha(m.group(1))
     m = re.search(
         r"(?:statement\s+closing\s+date|closing\s+date|billing\s+date|"
+        r"pr[oó]xima\s+fecha\s+de\s+cierre|"
         r"fecha\s+de\s+cierre(?:\s+del\s+estado\s+de\s+cuenta)?|fecha\s+de\s+corte|"
         r"fecha\s+de\s+facturaci[oó]n)\s*[:\s]*(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)",
         texto,
@@ -714,6 +735,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
     if r.dia_corte is None:
         m = re.search(
             r"(?:statement\s+closing\s+date|closing\s+date|billing\s+date|"
+            r"pr[oó]xima\s+fecha\s+de\s+cierre|"
             r"fecha\s+de\s+cierre|fecha\s+de\s+corte|fecha\s+de\s+facturaci[oó]n)\s*[:\s]*(\d{1,2})\b",
             texto,
             re.IGNORECASE,
@@ -725,6 +747,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     if r.dia_pago is None:
         for etiq in (
+            r"fecha\s+de\s+vencimiento\s+de\s+pago",
             r"fecha\s+de\s+vencimiento\s+del\s+pago",
             r"vencimiento\s+del\s+pago",
             r"fecha\s+l[ií]mite\s+de\s+pago",
@@ -744,6 +767,20 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                     r.dia_pago = d
                     break
     if r.dia_pago is None:
+        # "Fecha de vencimiento de pago sept 19" / "Due Date: Sep 20"
+        m = re.search(
+            rf"(?:fecha\s+de\s+vencimiento\s+de\s+pago|fecha\s+de\s+vencimiento(?:\s+del\s+pago)?|"
+            rf"vencimiento\s+del\s+pago|fecha\s+de\s+pago|payment\s+due\s+date|payment\s+due|"
+            rf"due\s+date|pay\s+by)\s*[:\s]*"
+            rf"((?:{_MESES_ES}|{_MESES_EN})\.?\s+\d{{1,2}}(?:[,\s]+\d{{2,4}})?)",
+            texto,
+            re.IGNORECASE,
+        )
+        if m:
+            d = _dia_desde_fecha(m.group(1))
+            if d:
+                r.dia_pago = d
+    if r.dia_pago is None:
         m = re.search(
             rf"(?:vencimiento\s+del\s+pago|fecha\s+de\s+pago|payment\s+due|due\s+date|pay\s+by)[^\n]{{0,40}}"
             rf"((?:{_MESES_ES}|{_MESES_EN})\.?\s+\d{{1,2}}(?:[,\s]+\d{{2,4}})?)",
@@ -757,6 +794,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     if r.dia_corte is None:
         for etiq in (
+            r"pr[oó]xima\s+fecha\s+de\s+cierre",
             r"fecha\s+de\s+cierre\s+del\s+pr[oó]ximo\s+estado\s+de\s+cuenta",
             r"fecha\s+de\s+cierre(?:\s+del\s+estado\s+de\s+cuenta)?",
             r"fecha\s+de\s+corte",
@@ -771,6 +809,18 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 if d:
                     r.dia_corte = d
                     break
+    if r.dia_corte is None:
+        m = re.search(
+            rf"(?:pr[oó]xima\s+fecha\s+de\s+cierre|statement\s+closing\s+date|"
+            rf"fecha\s+de\s+cierre|fecha\s+de\s+corte)\s*[:\s]*"
+            rf"((?:{_MESES_ES}|{_MESES_EN})\.?\s+\d{{1,2}}(?:[,\s]+\d{{2,4}})?)",
+            texto,
+            re.IGNORECASE,
+        )
+        if m:
+            d = _dia_desde_fecha(m.group(1))
+            if d:
+                r.dia_corte = d
     if r.dia_corte is None:
         m = re.search(
             rf"(?:{_MESES_ES}|{_MESES_EN})\.?\s+\d{{1,2}}[,\s]+\d{{2,4}}\s*[-–—a]+\s*"
@@ -793,8 +843,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             if d:
                 r.dia_corte = d
 
-    # Límite — Credit Limit / Límite de Crédito
+    # Límite — Credit Limit / Total Credit Line / Límite de Crédito
     for pat in (
+        rf"total\s+credit\s+line\s*[:\s]*\$?\s*{_MONTO}",
+        rf"total\s+credit\s+limit\s*[:\s]*\$?\s*{_MONTO}",
         rf"credit\s+limit\s*[:\s]*\$?\s*{_MONTO}",
         rf"credit\s+line\s*[:\s]*\$?\s*{_MONTO}",
         rf"l[ií]mite\s+de\s+cr[eé]dito\s*[:\s]*\$?\s*{_MONTO}",
@@ -811,7 +863,14 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.limite = val
                 break
     if r.limite is None:
-        for etiq in (r"credit\s+limit", r"credit\s+line", r"l[ií]mite\s+de\s+cr[eé]dito", r"l[ií]nea\s+de\s+cr[eé]dito"):
+        for etiq in (
+            r"total\s+credit\s+line",
+            r"total\s+credit\s+limit",
+            r"credit\s+limit",
+            r"credit\s+line",
+            r"l[ií]mite\s+de\s+cr[eé]dito",
+            r"l[ií]nea\s+de\s+cr[eé]dito",
+        ):
             bloque = _bloque_tras_etiqueta(texto, etiq, 80)
             if not bloque or re.search(r"adelanto|cash\s*advance", bloque, re.I):
                 continue
@@ -870,13 +929,15 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.current_balance = val
                 break
 
-    # Saldo al corte — Statement Balance / Last statement / Último balance de declaración
+    # Saldo al corte — Statement Balance / New Balance Total / Último balance de declaración
+    # NOTE: previous balance must NOT become current_balance or statement_balance.
     _ETIQ_STATEMENT = (
         r"last\s+statement\s+balance",
         r"statement\s+balance",
         r"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n",
         r"balance\s+de\s+(?:la\s+)?declaraci[oó]n",
         r"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta",
+        r"new\s+balance\s+total",
         r"new\s+balance",
         r"saldo\s+nuevo",
         r"saldo\s+al\s+corte",
@@ -895,6 +956,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             rf"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
             rf"balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
             rf"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
+            rf"new\s+balance\s+total\s*[:\s]*\$?\s*{_MONTO}",
             rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
             rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
             rf"saldo\s+al\s+corte\s*[:\s]*\$?\s*{_MONTO}",
@@ -919,7 +981,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             if not bloque:
                 continue
             primera = bloque.splitlines()[0] if bloque.splitlines() else bloque
-            if re.search(r"credit\s+limit|l[ií]mite", primera, re.I):
+            if re.search(r"credit\s+limit|l[ií]mite|previous\s+balance", primera, re.I):
                 continue
             val = _primer_monto(primera)
             if val is not None:
@@ -1050,7 +1112,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     # Pago mínimo: Capital One monto-antes; luego misma línea; luego columnas.
     _ETIQ_PAGO_MIN = (
+        rf"pago\s+{_MINIMO}\s+total\s+que\s+vence",
         rf"pago\s+{_MINIMO}\s+a\s+pagar",
+        r"total\s+minimum\s+payment\s+due",
+        r"current\s+payment\s+due",
         r"minimum\s+payment\s+(?:due|amount)",
         rf"{_MINIMO}\s+a\s+pagar",
         rf"pago\s+{_MINIMO}",
@@ -1066,7 +1131,10 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             break
     if r.pago_minimo is None:
         for pat in (
+            rf"pago\s+{_MINIMO}\s+total\s+que\s+vence\s*[:\s]*\$?\s*{_MONTO}",
             rf"pago\s+{_MINIMO}\s+a\s+pagar\s*[:\s]*\$?\s*{_MONTO}",
+            rf"total\s+minimum\s+payment\s+due\s*[:\s]*\$?\s*{_MONTO}",
+            rf"current\s+payment\s+due\s*[:\s]*\$?\s*{_MONTO}",
             rf"minimum\s+payment\s+(?:due|amount)\s*[:\s]*\$?\s*{_MONTO}",
             rf"pago\s+{_MINIMO}\s+requerido\s*[:\s]*\$?\s*{_MONTO}",
             rf"minimum\s+payment\s*[:\s]*\$?\s*{_MONTO}",
@@ -1080,7 +1148,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                     val = _float_es(m)
                 except ValueError:
                     continue
-                if 0 < val < 5000:
+                if 0 <= val < 5000:
                     r.pago_minimo = val
                     break
     if r.pago_minimo is None:
@@ -1136,14 +1204,18 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             r.apr = float(m.group(1).replace(",", "."))
             break
 
-    m = re.search(r"Penalty\s+APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%", texto, re.IGNORECASE)
+    m = re.search(
+        r"Penalty\s+APR(?:\s+of)?[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+        texto,
+        re.IGNORECASE,
+    )
     if m:
         r.penalty_apr = float(m.group(1).replace(",", "."))
     if r.penalty_apr is None:
         for pat in (
             r"Tasa\s+moratoria[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
             r"Tasa\s+de\s+mora[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
-            r"Default\s+APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
+            r"Default\s+APR(?:\s+of)?[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
         ):
             m = re.search(pat, texto, re.IGNORECASE)
             if m:
@@ -1152,7 +1224,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
 
     # Cargo por atraso ≠ tasa anual ni tasa moratoria
     for pat in (
-        r"late\s+fee\s+up\s+to\s+\$?\s*([\d]+(?:[.,]\d+)?)",
+        r"late\s+fee(?:\s+of)?\s+up\s+to\s+\$?\s*([\d]+(?:[.,]\d+)?)",
         r"Late\s+(?:Payment\s+)?Fee[:\s]*(?:up\s+to\s+)?\$?\s*([\d]+(?:[.,]\d+)?)",
         r"cargo\s+por\s+atraso(?:\s+en\s+el\s+pago)?(?:[^\d$]{0,40})(?:de\s+)?hasta\s+\$?\s*([\d]+(?:[.,]\d+)?)",
         r"cargo\s+por\s+atraso(?:\s+en\s+el\s+pago)?\s*[:\s]*\$?\s*([\d]+(?:[.,]\d+)?)",
