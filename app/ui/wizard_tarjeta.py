@@ -118,15 +118,9 @@ def _guardar_snapshot_paso1(
         "datos_int": di_dict,
     }
     st.session_state[_snap_paso1_key(prefix)] = snap
-
-    # Mirror into widget keys so they survive if still present.
-    k = _keys_form(prefix)
-    init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, snap["banco"], force=True)
-    init_select_with_add(k["nombre"], "nombres_tarjeta", NOMBRES_DEFAULT, snap["nombre"], force=True)
-    st.session_state[k["digitos"]] = snap["digitos"]
-    st.session_state[k["limite"]] = f"{snap['limite']:.2f}"
-    st.session_state[k["corte"]] = str(snap["corte"])
-    st.session_state[k["pago"]] = str(snap["pago"])
+    # No tocar swa_sel_* / widgets aquí: si ya se renderizaron en este run,
+    # Streamlit lanza StreamlitWidgetAlreadyInstantiatedError.
+    # La restauración a widgets ocurre en _restaurar_snapshot_paso1_a_widgets (antes de crearlos).
 
 
 def _leer_snapshot_paso1(prefix: str) -> dict | None:
