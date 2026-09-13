@@ -1393,6 +1393,7 @@ def procesar_fuentes_captura(
 
     for imagen in imagenes:
         vision_ok = False
+        identidad_incompleta = True
         try:
             from app.core.vision_gemini import (
                 _dump_textual_para_regex,
@@ -1406,22 +1407,28 @@ def procesar_fuentes_captura(
 
         if vision_disponible is not None and vision_disponible():
             datos_v = extraer_datos_desde_imagen_vision(imagen)
-            if datos_v is not None and (
-                datos_v.tiene_algo()
-                or datos_v.tiene_saldos_hoy()
-                or datos_v.tiene_reglas_banco()
-            ):
-                extras.append(datos_v)
-                dump = (
-                    _dump_textual_para_regex(datos_v)
-                    if _dump_textual_para_regex is not None
-                    else (datos_v.texto_crudo or "")
+            if datos_v is not None:
+                identidad_incompleta = not (
+                    datos_v.banco and datos_v.nombre_tarjeta and datos_v.ultimos_digitos
                 )
-                if dump.strip():
-                    partes.append(dump.strip())
-                vision_ok = True
+                # Aceptar balances aunque falte identidad (el usuario puede pegarla).
+                if (
+                    datos_v.tiene_algo()
+                    or datos_v.tiene_saldos_hoy()
+                    or datos_v.tiene_reglas_banco()
+                ):
+                    extras.append(datos_v)
+                    dump = (
+                        _dump_textual_para_regex(datos_v)
+                        if _dump_textual_para_regex is not None
+                        else (datos_v.texto_crudo or "")
+                    )
+                    if dump.strip():
+                        partes.append(dump.strip())
+                    vision_ok = True
 
-        if not vision_ok and ocr_disponible():
+        # Vision None o identidad vacía → OCR/regex de respaldo (si hay Tesseract).
+        if (not vision_ok or identidad_incompleta) and ocr_disponible():
             ocr = texto_desde_imagen(imagen)
             if ocr.strip():
                 partes.append(ocr.strip())

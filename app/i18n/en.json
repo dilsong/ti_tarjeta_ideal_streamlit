@@ -24,6 +24,11 @@
     "escribir_nuevo": "Enter {campo}",
     "placeholder_nuevo": "Custom name"
   },
+  "validacion": {
+    "error_faltan": "Missing required fields: {lista}.",
+    "error_revisa": "Check: {lista}.",
+    "campo_obligatorio_marca": " *"
+  },
   "pantalla_pin": {
     "crear_titulo": "Create Security PIN",
     "crear_subtitulo": "Choose a 4–6 digit PIN. It is saved on this device; you only create it once.",
@@ -149,7 +154,10 @@
     "seccion_apariencia": "Look & bank access",
     "btn_siguiente": "Next: Where you stand today →",
     "btn_anterior": "← Back to Step 1",
-    "error_volver_paso1": "Complete Step 1 (bank rules) first."
+    "error_volver_paso1": "Complete Step 1 (bank rules) first.",
+    "error_falta_paso1_identidad": "Go back to Step 1 and complete Bank, Card name, and Last 4 digits.",
+    "campo_fechas": "Cut-off / payment dates",
+    "datos_paso1_intereses": "Step 1 data (interest rates)"
   },
   "pantalla_lista_tarjetas": {
     "titulo": "My cards",

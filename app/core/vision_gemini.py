@@ -19,7 +19,7 @@ from PIL import Image
 
 from app.core.ocr_captura import DatosCaptura, aplicar_analisis_deuda
 
-_MAX_LADO = 1600
+_MAX_LADO = 1920
 _JPEG_QUALITY = 85
 _TIMEOUT_S = 45
 _ENDPOINT = (
@@ -31,8 +31,22 @@ _PROMPT = """\
 Analyze this bank credit-card screenshot / statement photo (often Capital One
 Spanish UI: "Hacer un pago", "Saldo actual", "Último balance de declaración").
 
-IMPORTANT layout: on Capital One "Hacer un pago", the dollar AMOUNT appears ABOVE
-its label (e.g. "$730.00" then "Saldo actual"). Do not swap amount and label.
+IMPORTANT layout quirks on Capital One "Hacer un pago":
+1) The dollar AMOUNT appears ABOVE its label (e.g. "$730.00" then "Saldo actual").
+   Do not swap amount and label.
+2) Card identity is often in the HEADER behind/above the payment modal, as
+   "Pagar a PRODUCTO...####" or "Pay PRODUCT...####"
+   (example: "Pagar a Quicksilver...6771"). Read that header for:
+   - nombre_tarjeta = product name (Quicksilver, Venture, Savor, …)
+   - ultimos_digitos = the 4 digits after the ellipsis
+   - banco = "Capital One" when the UI looks like Capital One
+
+Typical Capital One pay-screen mapping (example values):
+- "$0.00" above "Último balance de declaración" → statement_balance = 0,
+  statement_balance_detectado = true
+- "$730.00" above "Saldo actual" → current_balance = 730
+- "$291.33" above "Último pago registrado" → ultimo_pago = 291.33
+- "$0.00" above "Pago mínimo" → pago_minimo = 0
 
 Extract a single JSON object with these keys (use null if not visible):
 - banco (string, e.g. "Capital One")
@@ -51,7 +65,8 @@ Extract a single JSON object with these keys (use null if not visible):
 - late_fee (number)
 - past_due / monto_vencido_atrasado (number) — past due amount if any
 
-Return ONLY valid JSON, no markdown fences.
+Identity may be incomplete; still return balances you can see. Return ONLY valid
+JSON, no markdown fences.
 """
 
 
@@ -212,7 +227,16 @@ def _datos_desde_vision_json(data: dict[str, Any]) -> DatosCaptura:
 
 
 def _imagen_a_jpeg_b64(imagen: Image.Image) -> str:
-    img = imagen.convert("RGB")
+    """Normalize PNG/JPEG/RGBA → RGB JPEG (white bg) for the Vision API."""
+    if imagen.mode in ("RGBA", "LA") or (
+        imagen.mode == "P" and "transparency" in getattr(imagen, "info", {})
+    ):
+        rgba = imagen.convert("RGBA")
+        fondo = Image.new("RGB", rgba.size, (255, 255, 255))
+        fondo.paste(rgba, mask=rgba.split()[-1])
+        img = fondo
+    else:
+        img = imagen.convert("RGB")
     w, h = img.size
     lado = max(w, h)
     if lado > _MAX_LADO:

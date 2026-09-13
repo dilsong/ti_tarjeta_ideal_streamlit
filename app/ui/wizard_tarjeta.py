@@ -33,6 +33,12 @@ from app.core.salud_tarjeta import fmt_dinero
 from app.core.tarjetas import EstiloTarjeta, Tarjeta, guardar_tarjeta, obtener_tarjeta
 from app.i18n.translator import t
 from app.ui.form_intereses import aplicar_prefill_a_widgets, render_campos_intereses
+from app.ui.validacion_campos import (
+    marca_obligatorio,
+    mensaje_campos_faltantes,
+    mensaje_campos_revisa,
+    validar_requeridos,
+)
 
 NOMBRES_DEFAULT = [
     "Visa",
@@ -488,7 +494,7 @@ def _render_ocr_bloque(
                 st.error(t("pantalla_registrar_tarjeta.ocr_fallo"))
             elif not datos.tiene_saldos_hoy():
                 st.warning(t("wizard_tarjeta.ocr_p2_sin_saldos"))
-
+            # Identidad vacía no bloquea: el usuario puede pegar Banco/Nombre/dígitos.
         raw = st.session_state.get(ocr_k)
         if raw:
             datos = DatosCaptura.from_dict(raw)
@@ -569,6 +575,33 @@ def _init_form_desde_tarjeta(prefix: str, tarjeta: Tarjeta) -> None:
     st.session_state[f"seg_{k['estilo_seg']}"] = estilo_map.get(tarjeta.estilo, 1)
 
 
+def _identidad_desde_session(prefix: str) -> tuple[str, str, str]:
+    """Banco / nombre / dígitos guardados en session (Paso 1 → Paso 2)."""
+    k = _keys_form(prefix)
+    add_lbl = t("common.agregar_otro")
+    banco = (st.session_state.get(f"swa_sel_{k['banco']}", "") or "").strip()
+    if banco == add_lbl:
+        banco = (st.session_state.get(f"swa_custom_{k['banco']}", "") or "").strip()
+    nombre = (st.session_state.get(f"swa_sel_{k['nombre']}", "") or "").strip()
+    if nombre == add_lbl:
+        nombre = (st.session_state.get(f"swa_custom_{k['nombre']}", "") or "").strip()
+    digitos = str(st.session_state.get(k["digitos"], "") or "").strip()
+    return banco, nombre, digitos
+
+
+def _faltantes_identidad(banco: str, nombre: str, digitos: str) -> list[str]:
+    return validar_requeridos(
+        [
+            (t("pantalla_registrar_tarjeta.banco"), bool(banco.strip())),
+            (t("pantalla_registrar_tarjeta.nombre_tarjeta"), bool(nombre.strip())),
+            (
+                t("pantalla_registrar_tarjeta.ultimos_digitos"),
+                len(digitos) == 4 and digitos.isdigit(),
+            ),
+        ]
+    )
+
+
 def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
     """Paso 1 — reglas. Devuelve True si el usuario avanzó al paso 2."""
     st.markdown(f"### {t('wizard_tarjeta.paso1_titulo')}")
@@ -578,19 +611,19 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
 
     k = _keys_form(prefix)
     banco = select_with_add(
-        t("pantalla_registrar_tarjeta.banco"),
+        marca_obligatorio(t("pantalla_registrar_tarjeta.banco")),
         BANCOS_DEFAULT,
         key=k["banco"],
         categoria="bancos",
     )
     nombre = select_with_add(
-        t("pantalla_registrar_tarjeta.nombre_tarjeta"),
+        marca_obligatorio(t("pantalla_registrar_tarjeta.nombre_tarjeta")),
         NOMBRES_DEFAULT,
         key=k["nombre"],
         categoria="nombres_tarjeta",
     )
     digitos = st.text_input(
-        t("pantalla_registrar_tarjeta.ultimos_digitos"),
+        marca_obligatorio(t("pantalla_registrar_tarjeta.ultimos_digitos")),
         key=k["digitos"],
         max_chars=4,
         placeholder="1234",
@@ -598,23 +631,44 @@ def _render_paso1(prefix: str, tarjeta: Tarjeta | None) -> bool:
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        limite = monto_text_input(t("wizard_tarjeta.campo_limite"), k["limite"], placeholder="2000.00")
+        limite = monto_text_input(
+            marca_obligatorio(t("wizard_tarjeta.campo_limite")),
+            k["limite"],
+            placeholder="2000.00",
+        )
     with c2:
-        corte = entero_text_input(t("pantalla_registrar_tarjeta.fecha_corte"), k["corte"], placeholder="5")
+        corte = entero_text_input(
+            marca_obligatorio(t("pantalla_registrar_tarjeta.fecha_corte")),
+            k["corte"],
+            placeholder="5",
+        )
     with c3:
-        pago = entero_text_input(t("pantalla_registrar_tarjeta.fecha_pago"), k["pago"], placeholder="15")
+        pago = entero_text_input(
+            marca_obligatorio(t("pantalla_registrar_tarjeta.fecha_pago")),
+            k["pago"],
+            placeholder="15",
+        )
 
     prefill = st.session_state.get(_prefill_key(prefix, 1))
     datos_int = render_campos_intereses(prefix, tarjeta, prefill=prefill)
 
     err = st.empty()
     if st.button(t("wizard_tarjeta.btn_siguiente"), type="primary", use_container_width=True, key=f"{prefix}_paso1_next"):
-        if not banco.strip() or not nombre.strip() or len(digitos) != 4 or not digitos.isdigit():
-            err.error(t("pantalla_registrar_tarjeta.error_campos"))
-        elif limite <= 0:
-            err.error(t("pantalla_registrar_tarjeta.error_limite"))
-        elif not (1 <= int(corte) <= 31 and 1 <= int(pago) <= 31):
-            err.error(t("pantalla_registrar_tarjeta.error_campos"))
+        faltantes = validar_requeridos(
+            [
+                (t("pantalla_registrar_tarjeta.banco"), bool(banco.strip())),
+                (t("pantalla_registrar_tarjeta.nombre_tarjeta"), bool(nombre.strip())),
+                (
+                    t("pantalla_registrar_tarjeta.ultimos_digitos"),
+                    len(digitos) == 4 and digitos.isdigit(),
+                ),
+                (t("wizard_tarjeta.campo_limite"), limite > 0),
+                (t("pantalla_registrar_tarjeta.fecha_corte"), 1 <= int(corte) <= 31),
+                (t("pantalla_registrar_tarjeta.fecha_pago"), 1 <= int(pago) <= 31),
+            ]
+        )
+        if faltantes:
+            err.error(mensaje_campos_faltantes(faltantes))
         else:
             st.session_state[_paso_key(prefix)] = 2
             st.session_state[f"{prefix}_datos_int"] = datos_int
@@ -647,7 +701,7 @@ def _render_paso2(
         )
     with c2:
         saldo_hoy = monto_text_input(
-            t("wizard_tarjeta.campo_saldo_hoy"),
+            marca_obligatorio(t("wizard_tarjeta.campo_saldo_hoy")),
             k["adeudado"],
             placeholder="272.01",
         )
@@ -723,6 +777,14 @@ def _render_paso2(
             placeholder="https://",
         )
 
+    banco_prev, nombre_prev, digitos_prev = _identidad_desde_session(prefix)
+    faltantes_id_prev = _faltantes_identidad(banco_prev, nombre_prev, digitos_prev)
+    if faltantes_id_prev:
+        st.warning(
+            f"{mensaje_campos_revisa(faltantes_id_prev)} "
+            f"{t('wizard_tarjeta.error_falta_paso1_identidad')}"
+        )
+
     err = st.empty()
     c_back, c_save = st.columns(2)
     with c_back:
@@ -738,16 +800,17 @@ def _render_paso2(
         )
 
     if guardar:
-        banco = (st.session_state.get(f"swa_sel_{k['banco']}", "") or "").strip()
-        add_lbl = t("common.agregar_otro")
-        if banco == add_lbl:
-            banco = (st.session_state.get(f"swa_custom_{k['banco']}", "") or "").strip()
-        nombre = (st.session_state.get(f"swa_sel_{k['nombre']}", "") or "").strip()
-        if nombre == add_lbl:
-            nombre = (st.session_state.get(f"swa_custom_{k['nombre']}", "") or "").strip()
-        digitos = str(st.session_state.get(k["digitos"], ""))
+        banco, nombre, digitos = _identidad_desde_session(prefix)
         corte = st.session_state.get(k["corte"], "1")
         pago = st.session_state.get(k["pago"], "1")
+        try:
+            corte_ok = 1 <= int(corte) <= 31
+        except (TypeError, ValueError):
+            corte_ok = False
+        try:
+            pago_ok = 1 <= int(pago) <= 31
+        except (TypeError, ValueError):
+            pago_ok = False
         datos_int = st.session_state.get(f"{prefix}_datos_int")
         if datos_int is None and tarjeta:
             from app.ui.form_intereses import DatosIntereses
@@ -762,16 +825,22 @@ def _render_paso2(
                 cargo_atraso=tarjeta.cargo_atraso,
             )
 
-        if not banco or not nombre or len(digitos) != 4 or not digitos.isdigit():
-            err.error(t("pantalla_registrar_tarjeta.error_campos"))
-        elif limite <= 0:
-            err.error(t("pantalla_registrar_tarjeta.error_limite"))
+        faltantes_id = _faltantes_identidad(banco, nombre, digitos)
+        faltantes = validar_requeridos(
+            [
+                (t("wizard_tarjeta.campo_limite"), limite > 0),
+                (t("wizard_tarjeta.campo_fechas"), corte_ok and pago_ok),
+                (t("wizard_tarjeta.datos_paso1_intereses"), datos_int is not None),
+            ]
+        )
+        faltantes = faltantes_id + faltantes
+        if faltantes:
+            msg = mensaje_campos_faltantes(faltantes)
+            if faltantes_id:
+                msg = f"{msg} {t('wizard_tarjeta.error_falta_paso1_identidad')}"
+            err.error(msg)
         elif saldo_hoy > limite:
             err.error(t("pantalla_registrar_tarjeta.error_adeudado"))
-        elif not (1 <= int(corte) <= 31 and 1 <= int(pago) <= 31):
-            err.error(t("pantalla_registrar_tarjeta.error_campos"))
-        elif datos_int is None:
-            err.error(t("wizard_tarjeta.error_volver_paso1"))
         else:
             persist_if_new("bancos", banco, BANCOS_DEFAULT)
             persist_if_new("nombres_tarjeta", nombre, NOMBRES_DEFAULT)
