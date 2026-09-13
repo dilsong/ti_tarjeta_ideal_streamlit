@@ -40,6 +40,12 @@ class DatosCaptura:
     annual_fee: float | None = None
     daily_rate: float | None = None
     finance_charge: float | None = None
+    ultimo_pago: float | None = None
+    abonos_no_reflejados: float | None = None
+    deuda_real_activa: float | None = None
+    consumos_ciclo_actual: float | None = None
+    ciclo_anterior_saldado: bool = False
+    statement_balance_detectado: bool = False
 
     def tiene_datos_tarjeta(self) -> bool:
         return any(
@@ -294,7 +300,11 @@ def _primer_monto(bloque: str) -> float | None:
             val = _float_es(m)
         except ValueError:
             continue
-        if val <= 31 and "$" not in m.group(0) and "." not in m.group(1) and "," not in m.group(1):
+        # Acepta 0.00 / $0.00 (statement balance saldado); evita días sueltos (1–31).
+        tiene_decimal = "." in m.group(1) or "," in m.group(1)
+        if val == 0 and ("$" in m.group(0) or tiene_decimal):
+            return 0.0
+        if val <= 31 and "$" not in m.group(0) and not tiene_decimal:
             continue
         if val >= 1900 and val <= 2100:
             continue
@@ -538,6 +548,77 @@ def detectar_ultimos_digitos(texto: str) -> str | None:
     return None
 
 
+# Separadores tipicos de encabezado mobile: Quicksilver...6771 / ···· / — /
+_SEP_PRODUCTO_DIGITOS = (
+    r"(?:\s*(?:\.{2,}|·{2,}|•{2,}|…+|\*{2,}|x{2,}|X{2,}|-{2,}|–+|—+)\s*|\s+)"
+)
+
+
+def detectar_encabezado_producto_digitos(texto: str) -> tuple[str | None, str | None]:
+    """Detecta 'Quicksilver...6771', 'Quicksilver ···· 6771', 'Venture X 1234'."""
+    if not texto:
+        return None, None
+    for pat, nombre in _PRODUCTOS_TARJETA:
+        m = re.search(pat + _SEP_PRODUCTO_DIGITOS + r"(\d{4})\b", texto, re.IGNORECASE)
+        if m:
+            return nombre, m.group(1)
+    m = re.search(
+        r"\b([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3})"
+        + _SEP_PRODUCTO_DIGITOS
+        + r"(\d{4})\b",
+        texto,
+    )
+    if m:
+        return m.group(1).strip(), m.group(2)
+    return None, None
+
+
+def aplicar_analisis_deuda(r: DatosCaptura) -> DatosCaptura:
+    """Deriva deuda real activa y consumos del ciclo abierto desde saldo / statement."""
+    abonos = float(r.abonos_no_reflejados or 0.0)
+    saldo = r.current_balance if r.current_balance is not None else r.saldo
+    if saldo is not None:
+        r.deuda_real_activa = max(0.0, round(float(saldo) - abonos, 2))
+    if r.statement_balance_detectado and r.statement_balance is not None and float(r.statement_balance) <= 0.005:
+        r.ciclo_anterior_saldado = True
+        r.statement_balance = 0.0
+        if r.deuda_real_activa is not None:
+            r.consumos_ciclo_actual = r.deuda_real_activa
+        # pago_sin_intereses stays None / 0 — prior cycle paid
+        r.pago_sin_intereses = None
+    elif r.statement_balance is not None and r.statement_balance > 0:
+        r.ciclo_anterior_saldado = False
+        r.pago_sin_intereses = r.statement_balance
+    return r
+
+
+def encontrar_tarjeta_por_captura(datos: DatosCaptura):
+    """Match listar_tarjetas() by ultimos_digitos then nombre."""
+    from app.core.tarjetas import listar_tarjetas
+
+    digitos = (datos.ultimos_digitos or "").strip()
+    if not digitos or len(digitos) != 4:
+        return None
+    candidatas = [t for t in listar_tarjetas() if (t.ultimos_digitos or "").strip() == digitos]
+    if not candidatas:
+        return None
+    if len(candidatas) == 1:
+        return candidatas[0]
+    nombre = (datos.nombre_tarjeta or "").strip().lower()
+    if not nombre:
+        return None
+    por_nombre = [
+        t
+        for t in candidatas
+        if (t.nombre or "").strip().lower() == nombre
+        or nombre in (t.nombre or "").lower()
+        or (t.nombre or "").lower() in nombre
+    ]
+    if len(por_nombre) == 1:
+        return por_nombre[0]
+    return None
+
+
 def extraer_datos_captura(texto: str) -> DatosCaptura:
     bruto = texto or ""
     r = DatosCaptura(texto_crudo=bruto)
@@ -686,7 +767,7 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.limite = val
                 break
 
-    # Saldo en tiempo real — Current Balance (app del banco)
+    # Saldo en tiempo real — Current Balance (app del banco / Hacer un pago)
     for pat in (
         rf"current\s+balance\s*[:\s]*\$?\s*{_MONTO}",
         rf"saldo\s+actual\s*[:\s]*\$?\s*{_MONTO}",
@@ -707,8 +788,14 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             r"saldo\s+actual",
             r"balance\s+actual",
             r"outstanding\s+balance",
+            r"hacer\s+un\s+pago",
+            r"make\s+a\s+payment",
         ):
-            bloque = _bloque_tras_etiqueta(texto, etiq, 40)
+            val = _monto_en_lineas(texto, etiq, lineas=4)
+            if val is not None:
+                r.current_balance = val
+                break
+            bloque = _bloque_tras_etiqueta(texto, etiq, 60)
             if not bloque:
                 continue
             val = _primer_monto(bloque.splitlines()[0] if bloque.splitlines() else bloque)
@@ -716,9 +803,24 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                 r.current_balance = val
                 break
 
-    # Saldo al corte — Statement Balance / New Balance
+    # Saldo al corte — Statement Balance / Last statement / Último balance de declaración
+    _ETIQ_STATEMENT = (
+        r"last\s+statement\s+balance",
+        r"statement\s+balance",
+        r"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n",
+        r"balance\s+de\s+(?:la\s+)?declaraci[oó]n",
+        r"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta",
+        r"new\s+balance",
+        r"saldo\s+nuevo",
+        r"saldo\s+al\s+corte",
+        r"saldo\s+del\s+estado\s+de\s+cuenta",
+    )
     for pat in (
+        rf"last\s+statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
         rf"statement\s+balance\s*[:\s]*\$?\s*{_MONTO}",
+        rf"[uú]ltimo\s+balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
+        rf"balance\s+de\s+(?:la\s+)?declaraci[oó]n\s*[:\s]*\$?\s*{_MONTO}",
+        rf"saldo\s+del\s+(?:[uú]ltimo\s+)?estado\s+de\s+cuenta\s*[:\s]*\$?\s*{_MONTO}",
         rf"new\s+balance\s*[:\s]*\$?\s*{_MONTO}",
         rf"saldo\s+nuevo\s*(?:=\s*)?\$?\s*{_MONTO}",
         rf"saldo\s+al\s+corte\s*[:\s]*\$?\s*{_MONTO}",
@@ -728,16 +830,17 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         if m:
             try:
                 r.statement_balance = _float_es(m)
+                r.statement_balance_detectado = True
                 break
             except ValueError:
                 continue
-    if r.statement_balance is None:
-        for etiq in (
-            r"statement\s+balance",
-            r"new\s+balance",
-            r"saldo\s+nuevo",
-            r"saldo\s+al\s+corte",
-        ):
+    if not r.statement_balance_detectado:
+        for etiq in _ETIQ_STATEMENT:
+            val = _monto_en_lineas(texto, etiq, lineas=3)
+            if val is not None:
+                r.statement_balance = val
+                r.statement_balance_detectado = True
+                break
             bloque = _bloque_tras_etiqueta(texto, etiq, 40)
             if not bloque:
                 continue
@@ -747,6 +850,59 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
             val = _primer_monto(primera)
             if val is not None:
                 r.statement_balance = val
+                r.statement_balance_detectado = True
+                break
+
+    # Último pago / Last payment
+    for pat in (
+        rf"[uú]ltimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
+        rf"ultimo\s+pago\s*[:\s]*\$?\s*{_MONTO}",
+        rf"last\s+payment(?:\s+amount)?\s*[:\s]*\$?\s*{_MONTO}",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            try:
+                r.ultimo_pago = _float_es(m)
+                break
+            except ValueError:
+                continue
+    if r.ultimo_pago is None:
+        for etiq in (
+            r"[uú]ltimo\s+pago",
+            r"ultimo\s+pago",
+            r"last\s+payment(?:\s+amount)?",
+        ):
+            val = _monto_en_lineas(texto, etiq, lineas=3)
+            if val is not None:
+                r.ultimo_pago = val
+                break
+
+    # Abonos pendientes / no reflejados
+    for pat in (
+        rf"pending\s+payment(?:\s+amount)?\s*[:\s]*\$?\s*{_MONTO}",
+        rf"pago\s+pendiente\s*[:\s]*\$?\s*{_MONTO}",
+        rf"(?:abono|pago)\s+(?:no\s+reflejado|en\s+proceso|processing)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"payment\s+(?:processing|pending)\s*[:\s]*\$?\s*{_MONTO}",
+        rf"unposted\s+payment\s*[:\s]*\$?\s*{_MONTO}",
+    ):
+        m = re.search(pat, texto, re.IGNORECASE)
+        if m:
+            try:
+                r.abonos_no_reflejados = _float_es(m)
+                break
+            except ValueError:
+                continue
+    if r.abonos_no_reflejados is None:
+        for etiq in (
+            r"pending\s+payment",
+            r"pago\s+pendiente",
+            r"no\s+reflejado",
+            r"payment\s+processing",
+            r"unposted\s+payment",
+        ):
+            val = _monto_en_lineas(texto, etiq, lineas=3)
+            if val is not None and val > 0:
+                r.abonos_no_reflejados = val
                 break
 
     # Compatibilidad: saldo genérico si no hay desglose
@@ -859,6 +1015,21 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
                     break
 
     r.ultimos_digitos = detectar_ultimos_digitos(texto)
+
+    nombre_hdr, digitos_hdr = detectar_encabezado_producto_digitos(texto)
+    if nombre_hdr and not r.nombre_tarjeta:
+        r.nombre_tarjeta = nombre_hdr
+    if digitos_hdr and not r.ultimos_digitos:
+        r.ultimos_digitos = digitos_hdr
+    # Productos Capital One en encabezado de "Hacer un pago" sin logo textual.
+    if not r.banco and (r.nombre_tarjeta or "").strip().lower() in {
+        "quicksilver",
+        "venture",
+        "venture x",
+        "ventureone",
+        "savor",
+    }:
+        r.banco = "Capital One"
 
     for pat in (
         r"(?:Purchase\s+)?APR[:\s]*([\d]+(?:[.,]\d+)?)\s*%",
@@ -1035,9 +1206,11 @@ def extraer_datos_captura(texto: str) -> DatosCaptura:
         r.pago_sin_intereses = r.statement_balance
     if r.pago_sin_intereses is None and r.saldo is not None and r.saldo > 0:
         # En la mayoría de bancos, pagar el saldo nuevo evita recargos del ciclo.
-        r.pago_sin_intereses = r.saldo
+        # Si el ciclo anterior está saldado, aplicar_analisis_deuda lo anula.
+        if not (r.statement_balance_detectado and r.statement_balance is not None and float(r.statement_balance) <= 0.005):
+            r.pago_sin_intereses = r.saldo
 
-    return r
+    return aplicar_analisis_deuda(r)
 
 
 def procesar_ocr_reglas(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:
@@ -1090,6 +1263,10 @@ def _completar_vacios(destino: DatosCaptura, extra: DatosCaptura) -> DatosCaptur
     """Rellena solo los campos que la lectura principal no logró interpretar."""
     for campo in fields(DatosCaptura):
         if campo.name == "texto_crudo":
+            continue
+        if campo.name in ("statement_balance_detectado", "ciclo_anterior_saldado"):
+            if getattr(extra, campo.name):
+                setattr(destino, campo.name, True)
             continue
         if getattr(destino, campo.name) is None:
             valor = getattr(extra, campo.name)
@@ -1153,7 +1330,7 @@ def procesar_fuentes_captura(
         if resultado.ultimos_digitos is None:
             resultado.ultimos_digitos = detectar_ultimos_digitos(nombres_join)
 
-    return resultado
+    return aplicar_analisis_deuda(resultado)
 
 
 def procesar_imagen_y_texto(imagen: Image.Image | None, texto_manual: str = "") -> DatosCaptura:

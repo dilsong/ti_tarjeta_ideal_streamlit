@@ -22,6 +22,8 @@ from app.components.theme import BANCOS_DEFAULT, CARD_COLORS
 from app.core.enlaces_banco import url_catalogo
 from app.core.ocr_captura import (
     DatosCaptura,
+    aplicar_analisis_deuda,
+    encontrar_tarjeta_por_captura,
     ocr_disponible,
     pdf_disponible,
     procesar_fuentes_captura,
@@ -122,18 +124,69 @@ def _aplicar_ocr_paso1(prefix: str, datos: DatosCaptura) -> None:
 
 
 def _aplicar_ocr_paso2(prefix: str, datos: DatosCaptura) -> None:
-    k = _keys_form(prefix)
-    saldo_hoy = datos.current_balance if datos.current_balance is not None else datos.saldo
-    saldo_cierre = datos.statement_balance if datos.statement_balance is not None else datos.pago_sin_intereses
+    from app.ui.ocr_registro import NOMBRES_TARJETA_DEFAULT
 
-    if saldo_hoy is not None:
-        st.session_state[k["adeudado"]] = f"{saldo_hoy:.2f}"
-    if saldo_cierre is not None:
-        st.session_state[k["saldo_cierre"]] = f"{saldo_cierre:.2f}"
+    datos = aplicar_analisis_deuda(datos)
+    k = _keys_form(prefix)
+
+    adeudado = (
+        datos.deuda_real_activa
+        if datos.deuda_real_activa is not None
+        else (datos.current_balance if datos.current_balance is not None else datos.saldo)
+    )
+    if adeudado is not None:
+        st.session_state[k["adeudado"]] = f"{float(adeudado):.2f}"
+
+    if datos.statement_balance_detectado and datos.statement_balance is not None:
+        st.session_state[k["saldo_cierre"]] = f"{float(datos.statement_balance):.2f}"
+    elif datos.statement_balance is not None:
+        st.session_state[k["saldo_cierre"]] = f"{float(datos.statement_balance):.2f}"
+    elif datos.pago_sin_intereses is not None:
+        st.session_state[k["saldo_cierre"]] = f"{float(datos.pago_sin_intereses):.2f}"
+
     if datos.pago_minimo is not None:
         st.session_state[k["pago_min_hoy"]] = f"{datos.pago_minimo:.2f}"
     if datos.monto_vencido_atrasado is not None:
         st.session_state[k["past_due"]] = f"{max(0.0, float(datos.monto_vencido_atrasado)):.2f}"
+
+    st.session_state[f"{prefix}_ocr_ciclo_saldado"] = bool(datos.ciclo_anterior_saldado)
+    st.session_state[f"{prefix}_ocr_consumos_ciclo"] = datos.consumos_ciclo_actual
+    st.session_state[f"{prefix}_ocr_ultimo_pago"] = datos.ultimo_pago
+    st.session_state[f"{prefix}_ocr_deuda_real"] = datos.deuda_real_activa
+
+    if datos.ultimos_digitos:
+        st.session_state[k["digitos"]] = str(datos.ultimos_digitos).strip()[:4]
+    if datos.nombre_tarjeta:
+        init_select_with_add(
+            k["nombre"],
+            "nombres_tarjeta",
+            NOMBRES_TARJETA_DEFAULT,
+            datos.nombre_tarjeta,
+            force=True,
+        )
+    if datos.banco:
+        init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, datos.banco, force=True)
+
+    matched = encontrar_tarjeta_por_captura(datos)
+    if matched:
+        st.session_state[f"{prefix}_ocr_tarjeta_match"] = (
+            f"{matched.nombre} ····{matched.ultimos_digitos} ({matched.banco})"
+        )
+        if prefix != "edit":
+            if not datos.ultimos_digitos and matched.ultimos_digitos:
+                st.session_state[k["digitos"]] = str(matched.ultimos_digitos).strip()[:4]
+            if not datos.nombre_tarjeta and matched.nombre:
+                init_select_with_add(
+                    k["nombre"],
+                    "nombres_tarjeta",
+                    NOMBRES_TARJETA_DEFAULT,
+                    matched.nombre,
+                    force=True,
+                )
+            if not datos.banco and matched.banco:
+                init_select_with_add(k["banco"], "bancos", BANCOS_DEFAULT, matched.banco, force=True)
+    else:
+        st.session_state.pop(f"{prefix}_ocr_tarjeta_match", None)
 
 
 def _mostrar_resumen_ocr(datos: DatosCaptura, paso: int) -> None:
@@ -157,21 +210,63 @@ def _mostrar_resumen_ocr(datos: DatosCaptura, paso: int) -> None:
             (datos.late_fee, t("intereses.cargo_atraso_corto")),
             (datos.pago_minimo, t("intereses.pago_minimo")),
         )
+        for valor, etiqueta in campos:
+            if valor is not None:
+                if isinstance(valor, float):
+                    filas.append(
+                        f"- **{etiqueta}:** ${valor:,.2f}" if valor > 31 else f"- **{etiqueta}:** {valor}"
+                    )
+                else:
+                    filas.append(f"- **{etiqueta}:** {valor}")
     else:
+        datos = aplicar_analisis_deuda(datos)
+        if datos.nombre_tarjeta:
+            filas.append(
+                f"- **{t('pantalla_registrar_tarjeta.nombre_tarjeta')}:** {datos.nombre_tarjeta}"
+            )
+        if datos.ultimos_digitos:
+            filas.append(
+                f"- **{t('pantalla_registrar_tarjeta.ultimos_digitos')}:** {datos.ultimos_digitos}"
+            )
+        if datos.banco:
+            filas.append(f"- **{t('pantalla_registrar_tarjeta.banco')}:** {datos.banco}")
+        matched = encontrar_tarjeta_por_captura(datos)
+        if matched:
+            filas.append(
+                f"- **Tarjeta vinculada:** {matched.nombre} ····{matched.ultimos_digitos} ({matched.banco})"
+            )
         saldo_hoy = datos.current_balance if datos.current_balance is not None else datos.saldo
-        saldo_cierre = datos.statement_balance if datos.statement_balance is not None else datos.pago_sin_intereses
-        campos = (
-            (saldo_cierre, t("wizard_tarjeta.campo_saldo_cierre")),
-            (saldo_hoy, t("wizard_tarjeta.campo_saldo_hoy")),
-            (datos.pago_minimo, t("wizard_tarjeta.campo_pago_min_hoy")),
-            (datos.monto_vencido_atrasado, t("salud_tarjeta.monto_vencido")),
-        )
-    for valor, etiqueta in campos:
-        if valor is not None:
-            if isinstance(valor, float):
-                filas.append(f"- **{etiqueta}:** ${valor:,.2f}" if valor > 31 else f"- **{etiqueta}:** {valor}")
+        if saldo_hoy is not None:
+            filas.append(f"- **Saldo actual:** ${float(saldo_hoy):,.2f}")
+        if datos.ultimo_pago is not None:
+            filas.append(f"- **Último pago:** ${float(datos.ultimo_pago):,.2f}")
+        if datos.statement_balance_detectado and datos.statement_balance is not None:
+            filas.append(
+                f"- **Statement balance:** ${float(datos.statement_balance):,.2f}"
+            )
+        elif datos.statement_balance is not None:
+            filas.append(
+                f"- **{t('wizard_tarjeta.campo_saldo_cierre')}:** ${float(datos.statement_balance):,.2f}"
+            )
+        if datos.ciclo_anterior_saldado:
+            consumos = datos.consumos_ciclo_actual
+            if consumos is not None:
+                filas.append(
+                    f"- **Ciclo anterior saldado:** el cargo abierto "
+                    f"(${float(consumos):,.2f}) es consumo del ciclo actual"
+                )
             else:
-                filas.append(f"- **{etiqueta}:** {valor}")
+                filas.append("- **Ciclo anterior saldado:** sí")
+        if datos.deuda_real_activa is not None:
+            filas.append(f"- **Deuda real activa:** ${float(datos.deuda_real_activa):,.2f}")
+        if datos.pago_minimo is not None:
+            filas.append(
+                f"- **{t('wizard_tarjeta.campo_pago_min_hoy')}:** ${float(datos.pago_minimo):,.2f}"
+            )
+        if datos.monto_vencido_atrasado is not None:
+            filas.append(
+                f"- **{t('salud_tarjeta.monto_vencido')}:** ${float(datos.monto_vencido_atrasado):,.2f}"
+            )
     if filas:
         st.markdown("\n".join(filas))
     else:
@@ -664,8 +759,16 @@ def _render_paso2(
             if pago_min_manual and pago_min_manual > 0:
                 datos_int.pago_minimo_manual = pago_min_manual
 
-            saldo_ciclo = float(saldo_cierre) if saldo_cierre > 0 else float(saldo_hoy)
-            pago_sin_int = float(saldo_cierre) if saldo_cierre > 0 else None
+            if bool(st.session_state.get(f"{prefix}_ocr_ciclo_saldado")):
+                saldo_ciclo = 0.0
+                pago_sin_int = None
+            elif saldo_cierre > 0:
+                saldo_ciclo = float(saldo_cierre)
+                pago_sin_int = float(saldo_cierre)
+            else:
+                # legacy: no statement info → use saldo_hoy as prior-cycle estimate
+                saldo_ciclo = float(saldo_hoy)
+                pago_sin_int = None
 
             if editar_id and tarjeta:
                 manual = (url_manual or "").strip() or None
@@ -732,7 +835,7 @@ def _render_paso2(
 
 def _limpiar_wizard(prefix: str) -> None:
     for key in list(st.session_state.keys()):
-        if key.startswith(f"{prefix}_wizard") or key.startswith(f"{prefix}_ocr_p"):
+        if key.startswith(f"{prefix}_wizard") or key.startswith(f"{prefix}_ocr"):
             st.session_state.pop(key, None)
     st.session_state.pop(f"{prefix}_datos_int", None)
     if prefix == "reg":
