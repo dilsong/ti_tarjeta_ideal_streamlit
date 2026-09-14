@@ -198,7 +198,8 @@ def _apply_auth_into_bundle(bundle: dict[str, Any], auth: dict[str, str], pin_cr
 def hydrate_from_localstorage() -> None:
     """
     Carga bundle + auth desde localStorage del dispositivo.
-    Tres lecturas en paralelo (mismo tick de componentes).
+    Cuatro lecturas en paralelo (mismo tick de componentes).
+    Si el bundle primario viene vacío, intenta la copia de respaldo.
     """
     import streamlit as st
 
@@ -212,19 +213,27 @@ def hydrate_from_localstorage() -> None:
     from app.components.ti_storage import (
         STORAGE_KEY_AUTH,
         STORAGE_KEY_BUNDLE,
+        STORAGE_KEY_BUNDLE_BACKUP,
         STORAGE_KEY_PIN_CREATED,
         ls_get,
     )
 
     raw_bundle = ls_get(STORAGE_KEY_BUNDLE, widget_key="ti_ls_hydrate_bundle")
+    raw_backup = ls_get(STORAGE_KEY_BUNDLE_BACKUP, widget_key="ti_ls_hydrate_bundle_bak")
     raw_auth = ls_get(STORAGE_KEY_AUTH, widget_key="ti_ls_hydrate_auth")
     raw_flag = ls_get(STORAGE_KEY_PIN_CREATED, widget_key="ti_ls_hydrate_pin_flag")
 
-    # Esperar a que los tres componentes contesten (None = aún no listo).
-    if raw_bundle is None or raw_auth is None or raw_flag is None:
+    # Esperar a que los cuatro componentes contesten (None = aún no listo).
+    if raw_bundle is None or raw_backup is None or raw_auth is None or raw_flag is None:
         return
 
     bundle = _parse_bundle_raw(raw_bundle)
+    tiene_datos = bool(bundle.get("tarjetas") or bundle.get("pagos") or bundle.get("consumos"))
+    if not tiene_datos:
+        bak = _parse_bundle_raw(raw_backup)
+        if bak.get("tarjetas") or bak.get("pagos") or bak.get("consumos"):
+            bundle = bak
+
     auth = _parse_auth_raw(raw_auth)
     pin_created = str(raw_flag).strip() in ("1", "true", "yes", "on")
     if auth.get("pin_hash") and auth.get("pin_salt"):
@@ -329,13 +338,20 @@ def flush_bundle_to_localstorage(bundle: dict[str, Any] | None = None) -> None:
         payload_obj["device_id"] = ensure_device_id()
         st.session_state[_SESSION_BUNDLE] = payload_obj
 
-    from app.components.ti_storage import STORAGE_KEY_BUNDLE, inject_ls_write, ls_set
+    from app.components.ti_storage import (
+        STORAGE_KEY_BUNDLE,
+        STORAGE_KEY_BUNDLE_BACKUP,
+        inject_ls_write,
+        ls_set,
+    )
 
     seq = int(st.session_state.get(_SESSION_LS_FLUSH, 0)) + 1
     st.session_state[_SESSION_LS_FLUSH] = seq
     raw = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":"))
     ls_set(STORAGE_KEY_BUNDLE, raw, widget_key=f"ti_ls_flush_{seq}")
+    ls_set(STORAGE_KEY_BUNDLE_BACKUP, raw, widget_key=f"ti_ls_flush_bak_{seq}")
     inject_ls_write(STORAGE_KEY_BUNDLE, raw)
+    inject_ls_write(STORAGE_KEY_BUNDLE_BACKUP, raw)
 
     cfg = payload_obj.get("config") or {}
     if cfg.get("pin_hash") and cfg.get("pin_salt"):

@@ -41,7 +41,9 @@
     "error_pin_corto": "PIN must be 4 to 6 numeric digits.",
     "error_pin_no_coincide": "PINs do not match.",
     "error_pin_incorrecto": "Incorrect PIN. Try again.",
-    "exito_pin": "PIN created. Your information is protected."
+    "exito_pin": "PIN created. Your information is protected.",
+    "aviso_ios_storage": "On iPhone, Safari and the Home Screen icon keep separate storage. Create the PIN and always open TI from the same place (Home Screen icon or Safari — do not mix).",
+    "datos_conservados": "Cards or movements were found on this device. Creating the PIN will keep them."
   },
   "licencia": {
     "titulo": "Trial ended",
@@ -64,6 +66,7 @@
     "usar_monto_tarjeta": "Register on {nombre}",
     "empty_titulo": "Your wallet deserves the best choice",
     "empty_subtitulo": "You have no cards yet. Ideal Card helps you always pick the most comfortable option.",
+    "empty_aviso_storage": "If you already registered cards, open TI from the same place where you created the PIN (Home Screen icon or Safari). On iPhone they do not share data. You can also restore a backup under Configure → Help.",
     "empty_beneficio_1": "Total privacy: your data never leaves your phone.",
     "empty_beneficio_2": "Human recommendations based on cut-off and payment dates.",
     "empty_beneficio_3": "Architecture ready for smart payment reminders.",
@@ -342,7 +345,15 @@
     "boton_exportar": "Prepare ZIP package",
     "boton_descargar": "Download support package",
     "export_ok": "Package ready. Download and send it.",
-    "export_hint": "Tap the button to download the ZIP, then send it by WhatsApp or email."
+    "export_hint": "Tap the button to download the ZIP, then send it by WhatsApp or email.",
+    "respaldo_titulo": "Data backup",
+    "respaldo_ayuda": "Download a JSON copy of your cards, payments and purchases (no PIN). Keep it in Files or iCloud. If you lose the app, restore it here.",
+    "boton_descargar_respaldo": "Download JSON backup",
+    "restaurar_titulo": "Restore from backup",
+    "restaurar_ayuda": "Upload a TI JSON backup. It replaces cards, payments and purchases on this device.",
+    "boton_restaurar": "Restore backup",
+    "restaurar_ok": "Backup restored. Go back to Home to see your cards.",
+    "restaurar_error": "Could not read the backup. Use a JSON file exported by TI."
   },
   "historial": {
     "filtro": "Filter movements",

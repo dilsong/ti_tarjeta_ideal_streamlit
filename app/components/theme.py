@@ -110,7 +110,7 @@ MOBILE_CSS = """
         color: #94A3B8 !important;
         background: transparent !important;
         font-weight: 500 !important;
-        font-size: 0.82rem !important;
+        font-size: calc(0.82rem + 1pt) !important;
         padding: 0.45rem 0.35rem !important;
     }
     div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {

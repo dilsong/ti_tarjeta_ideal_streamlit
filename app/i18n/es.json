@@ -41,7 +41,9 @@
     "error_pin_corto": "El PIN debe tener entre 4 y 6 dígitos numéricos.",
     "error_pin_no_coincide": "Los PIN no coinciden.",
     "error_pin_incorrecto": "PIN incorrecto. Intenta de nuevo.",
-    "exito_pin": "PIN creado. Tu información está protegida."
+    "exito_pin": "PIN creado. Tu información está protegida.",
+    "aviso_ios_storage": "En iPhone, Safari y el ícono de inicio guardan datos por separado. Crea el PIN y usa la app siempre desde el mismo acceso (el ícono de inicio o Safari, no mezcles).",
+    "datos_conservados": "Se detectaron tarjetas o movimientos en este dispositivo. Al crear el PIN se conservarán."
   },
   "licencia": {
     "titulo": "Prueba finalizada",
@@ -64,6 +66,7 @@
     "usar_monto_tarjeta": "Registrar en {nombre}",
     "empty_titulo": "Tu bolsillo merece la mejor decisión",
     "empty_subtitulo": "Aún no tienes tarjetas registradas. Tarjeta Ideal te ayudará a elegir siempre la opción más cómoda.",
+    "empty_aviso_storage": "Si ya habías registrado tarjetas, abre TI desde el mismo acceso donde creaste el PIN (ícono de inicio o Safari). En iPhone no comparten datos. También puedes restaurar un respaldo en Configurar → Ayuda.",
     "empty_beneficio_1": "Privacidad total: tus datos nunca salen de tu teléfono.",
     "empty_beneficio_2": "Recomendaciones humanas según fechas de corte y pago.",
     "empty_beneficio_3": "Arquitectura lista para recordatorios inteligentes de pago.",
@@ -341,7 +344,15 @@
     "boton_exportar": "Preparar paquete ZIP",
     "boton_descargar": "Descargar paquete de soporte",
     "export_ok": "Paquete listo. Descargalo y envialo.",
-    "export_hint": "Al tocar el botón se descarga el ZIP. Luego envíalo por WhatsApp o email."
+    "export_hint": "Al tocar el botón se descarga el ZIP. Luego envíalo por WhatsApp o email.",
+    "respaldo_titulo": "Respaldo de tus datos",
+    "respaldo_ayuda": "Descarga una copia JSON de tus tarjetas, abonos y consumos (sin PIN). Guárdala en Archivos o iCloud. Si pierdes la app, restáurala aquí.",
+    "boton_descargar_respaldo": "Descargar respaldo JSON",
+    "restaurar_titulo": "Restaurar desde respaldo",
+    "restaurar_ayuda": "Sube un archivo JSON de respaldo de TI. Reemplaza tarjetas, pagos y consumos de este dispositivo.",
+    "boton_restaurar": "Restaurar respaldo",
+    "restaurar_ok": "Respaldo restaurado. Vuelve a Inicio para ver tus tarjetas.",
+    "restaurar_error": "No se pudo leer el respaldo. Usa un JSON exportado por TI."
   },
   "historial": {
     "filtro": "Filtrar movimientos",

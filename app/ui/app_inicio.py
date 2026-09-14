@@ -207,6 +207,7 @@ def _render_tip_estrategia(tarjetas, tarjeta_sel) -> None:
 def _render_empty(on_navigate) -> None:
     render_page_header(t("pantalla_inicio.empty_titulo"))
     st.info(t("pantalla_inicio.empty_subtitulo"))
+    st.warning(t("pantalla_inicio.empty_aviso_storage"))
 
     for key in ("empty_beneficio_1", "empty_beneficio_2", "empty_beneficio_3", "empty_beneficio_4"):
         st.markdown(f'<div class="ti-benefit">✦ {t(f"pantalla_inicio.{key}")}</div>', unsafe_allow_html=True)

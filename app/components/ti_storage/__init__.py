@@ -12,6 +12,8 @@ _ls = components.declare_component("ti_local_storage", path=str(_COMPONENT_DIR))
 
 # Bundle completo (tarjetas, pagos, config, …)
 STORAGE_KEY_BUNDLE = "ti_app_bundle_v1"
+# Copia de seguridad en la misma origen (si el primario se corrompe o se vacía)
+STORAGE_KEY_BUNDLE_BACKUP = "ti_app_bundle_bak_v1"
 # Auth indestructible (sobrevive aunque el bundle falle al parsear)
 STORAGE_KEY_PIN_CREATED = "ti_pin_created"
 STORAGE_KEY_AUTH = "ti_app_auth_v1"

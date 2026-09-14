@@ -502,10 +502,15 @@ def _render_crear_pin(on_unlock) -> None:
     # Sin ti_spinner: en iPhone PWA el overlay en window.top sobrevive al rerun y bloquea la app.
     st.title("💳 " + t("pantalla_pin.crear_titulo"))
     st.info(t("pantalla_pin.crear_subtitulo"))
-    st.warning(
-        "En iPhone, Safari y el acceso directo (app) guardan el PIN por separado. "
-        "Si usas el ícono de inicio, crea el PIN desde ese ícono (no desde el link de Safari)."
-    )
+    st.warning(t("pantalla_pin.aviso_ios_storage"))
+    try:
+        from app.core.browser_store import get_bundle
+
+        b = get_bundle()
+        if b.get("tarjetas") or b.get("pagos") or b.get("consumos"):
+            st.success(t("pantalla_pin.datos_conservados"))
+    except Exception:
+        pass
     _inject_storage_persist_once()
 
     step = st.session_state.get("pin_step", "pin")

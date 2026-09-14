@@ -1,8 +1,9 @@
 """
-Arranque limpio monousuario: sin PIN en el dispositivo → sin tarjetas.
+Arranque limpio monousuario.
 
-En PWA/Render NUNCA toca app/data/ del servidor.
-Si ti_pin_created / PIN existe en localStorage, no vacía nada.
+En PWA/Render NUNCA toca app/data/ del servidor ni borra el bundle del dispositivo.
+Si falta el PIN pero hay tarjetas/pagos, se conservan (Safari vs ícono / flag fallida).
+El wipe de lab (filesystem) solo aplica fuera de browser storage.
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ def _write_json(path: Path, data: Any) -> None:
 
 def asegurar_arranque_limpio_sin_pin() -> None:
     """
-    Solo si el dispositivo NO tiene PIN: deja tarjetas/pagos/consumos vacíos.
-    Si ya hay PIN (localStorage), no altera datos del usuario.
+    Browser/PWA: no-op (nunca vaciar tarjetas por ausencia de PIN).
+    Lab filesystem: si no hay PIN, deja listas vacías para demos locales.
     """
     from app.core.browser_store import pin_flag_from_client, use_browser_storage
     from app.core.seguridad import pin_configurado
@@ -31,19 +32,8 @@ def asegurar_arranque_limpio_sin_pin() -> None:
     if pin_configurado() or pin_flag_from_client():
         return
 
+    # Crítico: en dispositivo real, un PIN no leído NO autoriza borrar datos.
     if use_browser_storage():
-        from app.core.browser_store import empty_bundle, get_bundle, replace_bundle
-
-        bundle = get_bundle()
-        if not (bundle.get("tarjetas") or bundle.get("pagos") or bundle.get("consumos")):
-            return
-        idioma = (bundle.get("config") or {}).get("idioma", "es")
-        limpio = empty_bundle()
-        limpio["config"]["idioma"] = idioma or "es"
-        if isinstance(bundle.get("device_id"), str):
-            limpio["device_id"] = bundle["device_id"]
-        # Preservar device_id; no tocar localStorage de PIN (no hay)
-        replace_bundle(limpio)
         return
 
     # Lab filesystem únicamente (fuera de Render)
